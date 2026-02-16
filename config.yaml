@@ -1,0 +1,76 @@
+audio:
+  sample_rate: 16000
+  channels: 1
+  chunk_ms: 30                       # frame size for VAD (10, 20, or 30 ms)
+  dtype: "int16"
+
+wake_word:
+  engine: "openwakeword"
+  # Path to custom .onnx model or built-in name
+  # To train custom: https://github.com/dscripka/openwakeword#training-custom-models
+  # If no model provided, it will wait for "hey jarvis"
+  model_path: "models/openwakeword/andromeda.onnx"
+  threshold: 0.5                     # detection confidence threshold (0.0 - 1.0)
+
+vad:
+  aggressiveness: 2                  # 0-3, higher = more aggressive noise filtering
+  silence_timeout_sec: 2.0
+  speech_pad_ms: 300                 # padding before/after speech segments
+  max_recording_sec: 30
+  min_recording_sec: 0.5
+  energy_threshold_factor: 0.3       # threshold = calibrated_speech_energy * this factor
+  energy_decay_rate: 0.95            # per-second decay of energy threshold
+
+noise:
+  enabled: true
+  stationary: true                   # true for constant background noise (fan, AC)
+  prop_decrease: 0.75                # how much to reduce noise (0.0-1.0)
+
+stt:
+  engine: "faster-whisper"
+  model_size: "large-v3"             # tiny, base, small, medium, large-v3
+  device: "auto"                     # auto, cpu, cuda
+  compute_type: "int8"               # float16, int8 (int8 good for Apple Silicon)
+  language: "it"
+  beam_size: 5
+  vad_filter: true                   # whisper's built-in VAD for better accuracy
+
+agent:
+  provider: "ollama"
+  base_url: "http://localhost:11434"
+  model: "llama3.1:8b"
+  max_tokens: 500
+  system_prompt: |
+    Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. 
+    Rispondi in italiano, in modo conciso e naturale.
+    Le tue risposte verranno lette ad alta voce, quindi:
+    - Usa frasi brevi e chiare
+    - Evita formattazione markdown, elenchi puntati, simboli speciali
+    - Non usare abbreviazioni ambigue
+    - Quando dai numeri, scrivi la forma parlata (es. "duemila" non "2000")
+
+tts:
+  engine: "piper"
+  # Download from: https://github.com/rhasspy/piper/blob/master/VOICES.md
+  model_path: "models/piper/it_IT-paola-medium.onnx"
+  model_config: "models/piper/it_IT-paola-medium.onnx.json"
+  speaker_id: 0
+  length_scale: 1.0 # speech speed (lower = faster)
+  sentence_silence: 0.5  # pause between sentences in seconds
+
+tools:
+  knowledge_base_path: "data/knowledge.json"
+  weather_timeout_sec: 10.0
+  timer_max_sec: 3600
+
+stop_word:
+  enabled: true
+  energy_multiplier: 1.5  # energy gate = calibrated_speech * this (filters TTS echo)
+
+feedback:
+  wake_sound: "sounds/wake.wav"
+  done_sound: "sounds/done.wav"
+  error_sound: "sounds/error.wav"
+
+logging:
+  level: "INFO" # DEBUG, INFO, WARNING, ERROR

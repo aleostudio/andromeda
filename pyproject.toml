@@ -1,0 +1,45 @@
+[project]
+name = "andromeda"
+version = "0.1.0"
+description = "Smart home assistant completely offline"
+requires-python = ">=3.11,<3.14"
+dependencies = [
+    "sounddevice>=0.5.0",
+    "numpy>=1.26.0",
+    "webrtcvad>=2.0.10",
+    "setuptools<81",
+    "noisereduce>=3.0.0",
+    "faster-whisper>=1.0.0",
+    "openwakeword>=0.6.0",
+    "piper-tts>=1.2.0",
+    "httpx>=0.27.0",
+    "pyyaml>=6.0",
+    "scipy>=1.12.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.23",
+    "ruff>=0.5.0",
+]
+
+[project.scripts]
+voice-assistant = "andromeda.main:main"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["andromeda"]
+
+[tool.uv]
+package = true
+
+[tool.ruff]
+target-version = "py311"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "W", "F", "I", "N", "UP", "B", "A", "SIM"]
