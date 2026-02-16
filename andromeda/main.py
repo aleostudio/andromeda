@@ -16,6 +16,7 @@ from andromeda.config import AppConfig
 from andromeda.feedback import AudioFeedback
 from andromeda.state_machine import AssistantState, StateMachine
 from andromeda.stt import SpeechRecognizer
+from andromeda.intent import match_and_execute
 from andromeda.tools import register_all_tools
 from andromeda.tts import TextToSpeech
 from andromeda.vad import VoiceActivityDetector
@@ -204,6 +205,19 @@ class VoiceAssistant:
 
         logger.info("User said: %s", text)
 
+        # Try fast intent match first (no LLM needed)
+        fast_response = await match_and_execute(text)
+        if fast_response:
+            logger.info("Fast intent response: %s", fast_response[:80])
+            self._response_text = fast_response
+            self._audio.mute()
+            try:
+                await self._tts.speak(fast_response)
+            finally:
+                self._audio.unmute()
+            return AssistantState.SPEAKING
+
+        # No fast match — use LLM
         self._audio.mute()
         try:
             if self._cfg.agent.streaming:
