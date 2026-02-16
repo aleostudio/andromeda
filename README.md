@@ -71,6 +71,14 @@ make setup
 
 It will create folders, force deps sync and download models for **OpenWakeWord**, **Whisper** and **Piper**.
 
+At this point, ensure you have **Ollama model** installed, with:
+
+```bash
+ollama pull llama3.1:8b
+```
+
+If you are running Andromeda on a **Mac Silicon** and you have at least **24gb** of ram, you can also safely use `gpt-oss:20b`.
+
 Once setup is finished, customize your `config.yaml` file.
 
 [↑ index](#index)
