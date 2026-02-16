@@ -106,13 +106,14 @@ This is the **state machine** for every interaction:
 
 ```txt
          ┌────────────┐                   ┌──────────┐
-IDLE ──▶ │ wake word  │ ──▶ LISTENING ──▶ │   your   │
+IDLE ──▶ │ Wake word  │ ──▶ LISTENING ──▶ │   Your   │
 ▲  ▲     │ recognized │                   │ sentence │
 │  │     └────────────┘                   └─────┬────┘
 │  │                                            │
-│  │                                            ▼
-│  │                                      ┌────────────┐
-│  └───── SPEAKING ◀──── PROCESSING ◀──── │  silence   │
+│  │                  ┌──────────────┐          │
+│  │                  │ Patterns/LLM │          ▼
+│  │                  └───────┬──────┘    ┌────────────┐
+│  └───── SPEAKING ◀──── PROCESSING ◀──── │  Silence   │
 │                             │           │ recognized │
 │                             ▼           └────────────┘
 │                     ┌──────────────┐
