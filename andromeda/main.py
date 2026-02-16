@@ -50,7 +50,8 @@ class VoiceAssistant:
         # Shared state between handlers
         self._recorded_audio = None
         self._response_text = ""
-        self._speech_energy: float = 0.0  # calibrated speech energy level
+        self._speech_energy: float = 0.0
+        self._is_follow_up: bool = False  # True when listening for follow-up (no wake word needed)
 
 
     # Initialize all components. Call before run().
@@ -100,6 +101,7 @@ class VoiceAssistant:
     async def _handle_idle(self, _state: AssistantState) -> AssistantState:
         self._wake_word.reset()
         self._audio.unmute()
+        self._is_follow_up = False
 
         # Wait for wake word detection (runs in thread via event)
         loop = asyncio.get_event_loop()
@@ -129,6 +131,9 @@ class VoiceAssistant:
 
     # LISTENING: Record user speech until silence timeout
     async def _handle_listening(self, _state: AssistantState) -> AssistantState:
+        if self._is_follow_up:
+            return await self._handle_follow_up_listening()
+
         self._audio.start_recording()
         self._vad.start()
 
@@ -152,6 +157,41 @@ class VoiceAssistant:
         return AssistantState.PROCESSING
 
 
+    # FOLLOW-UP LISTENING: Wait briefly for user to speak without wake word
+    async def _handle_follow_up_listening(self) -> AssistantState:
+        follow_up_timeout = self._cfg.conversation.follow_up_timeout_sec
+        logger.info("Follow-up listening for %.1fs...", follow_up_timeout)
+
+        # Reuse last calibrated energy for VAD threshold
+        if self._speech_energy > 0:
+            energy_threshold = self._speech_energy * self._cfg.vad.energy_threshold_factor
+            self._vad.set_energy_threshold(energy_threshold)
+
+        self._audio.start_recording()
+        self._vad.start()
+
+        # Wait for speech end OR follow-up timeout (whichever comes first)
+        loop = asyncio.get_event_loop()
+        await loop.run_in_executor(None, lambda: self._vad.wait_for_speech_end(timeout=follow_up_timeout))
+
+        self._vad.stop()
+        self._recorded_audio = self._audio.stop_recording()
+        self._vad.set_energy_threshold(0.0)
+
+        # Check if user actually spoke
+        min_samples = int(self._cfg.vad.min_recording_sec * self._cfg.audio.sample_rate)
+        if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
+            logger.info("No follow-up detected, back to IDLE")
+            self._is_follow_up = False
+
+            return AssistantState.IDLE
+
+        logger.info("Follow-up speech detected")
+        self._feedback.play("done")
+
+        return AssistantState.PROCESSING
+
+
     # PROCESSING: STT transcription + AI agent call
     async def _handle_processing(self, _state: AssistantState) -> AssistantState:
         # Transcribe
@@ -159,6 +199,8 @@ class VoiceAssistant:
 
         if not text.strip():
             logger.info("Empty transcription, back to IDLE")
+            self._is_follow_up = False
+
             return AssistantState.IDLE
 
         logger.info("User said: %s", text)
@@ -169,13 +211,20 @@ class VoiceAssistant:
         return AssistantState.SPEAKING
 
 
-    # SPEAKING: TTS playback, mic muted to avoid echo
+    # SPEAKING: TTS playback, then listen for follow-up
     async def _handle_speaking(self, _state: AssistantState) -> AssistantState:
         self._audio.mute()
         try:
             await self._tts.speak(self._response_text)
         finally:
             self._audio.unmute()
+
+        # After speaking, listen for follow-up instead of going back to IDLE
+        if self._cfg.conversation.follow_up_timeout_sec > 0:
+            self._is_follow_up = True
+
+            return AssistantState.LISTENING
+
         return AssistantState.IDLE
 
 

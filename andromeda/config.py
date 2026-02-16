@@ -85,6 +85,11 @@ class FeedbackConfig:
 
 
 @dataclass(frozen=True)
+class ConversationConfig:
+    follow_up_timeout_sec: float = 5.0  # seconds to wait for follow-up after TTS ends
+
+
+@dataclass(frozen=True)
 class ToolsConfig:
     knowledge_base_path: str = "data/knowledge.json"
     weather_timeout_sec: float = 10.0
@@ -106,8 +111,8 @@ class AppConfig:
     stt: STTConfig = field(default_factory=STTConfig)
     agent: AgentConfig = field(default_factory=AgentConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
+    conversation: ConversationConfig = field(default_factory=ConversationConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
-
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -130,8 +135,8 @@ class AppConfig:
             stt=STTConfig(**raw.get("stt", {})),
             agent=AgentConfig(**raw.get("agent", {})),
             tts=TTSConfig(**raw.get("tts", {})),
+            conversation=ConversationConfig(**raw.get("conversation", {})),
             tools=ToolsConfig(**raw.get("tools", {})),
-
             feedback=FeedbackConfig(**raw.get("feedback", {})),
             logging=LoggingConfig(**raw.get("logging", {})),
         )

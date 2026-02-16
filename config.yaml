@@ -58,6 +58,9 @@ tts:
   length_scale: 1.0 # speech speed (lower = faster)
   sentence_silence: 0.5  # pause between sentences in seconds
 
+conversation:
+  follow_up_timeout_sec: 5.0         # seconds to wait for follow-up after response (0 = disabled)
+
 tools:
   knowledge_base_path: "data/knowledge.json"
   weather_timeout_sec: 10.0
