@@ -64,6 +64,7 @@ class AgentConfig:
     base_url: str = "http://localhost:11434"
     model: str = "llama3.1:8b"
     max_tokens: int = 500
+    streaming: bool = False  # stream response sentence-by-sentence for lower latency
     system_prompt: str = "Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. Rispondi in italiano, in modo conciso e naturale. Le tue risposte verranno lette ad alta voce, quindi usa frasi brevi e chiare, evita formattazione markdown, elenchi puntati, simboli speciali, non usare abbreviazioni ambigue e quando dai numeri, scrivi la forma parlata (es. duemila e non 2000)"
 
 

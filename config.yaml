@@ -1,7 +1,7 @@
 audio:
   sample_rate: 16000
   channels: 1
-  chunk_ms: 30                       # frame size for VAD (10, 20, or 30 ms)
+  chunk_ms: 30                  # frame size for VAD (10, 20, or 30 ms)
   dtype: "int16"
 
 wake_word:
@@ -10,36 +10,37 @@ wake_word:
   # To train custom: https://github.com/dscripka/openwakeword#training-custom-models
   # If no model provided, it will wait for "hey jarvis"
   model_path: "models/openwakeword/andromeda.onnx"
-  threshold: 0.5                     # detection confidence threshold (0.0 - 1.0)
+  threshold: 0.5                # detection confidence threshold (0.0 - 1.0)
 
 vad:
-  aggressiveness: 3                  # 0-3, higher = more aggressive noise filtering
+  aggressiveness: 3             # 0-3, higher = more aggressive noise filtering
   silence_timeout_sec: 1.5
-  speech_pad_ms: 300                 # padding before/after speech segments
+  speech_pad_ms: 300            # padding before/after speech segments
   max_recording_sec: 30
   min_recording_sec: 0.5
-  energy_threshold_factor: 0.6       # threshold = calibrated_speech_energy * this factor
-  energy_decay_rate: 0.98            # per-second decay of energy threshold
+  energy_threshold_factor: 0.6  # threshold = calibrated_speech_energy * this factor
+  energy_decay_rate: 0.98       # per-second decay of energy threshold
 
 noise:
   enabled: false
-  stationary: true                   # true for constant background noise (fan, AC)
-  prop_decrease: 0.75                # how much to reduce noise (0.0-1.0)
+  stationary: true              # true for constant background noise (fan, AC)
+  prop_decrease: 0.75           # how much to reduce noise (0.0-1.0)
 
 stt:
   engine: "faster-whisper"
-  model_size: "medium"               # tiny, base, small, medium, large-v3
-  device: "auto"                     # auto, cpu, cuda
-  compute_type: "int8"               # float16, int8 (int8 good for Apple Silicon)
+  model_size: "medium"          # tiny, base, small, medium, large-v3
+  device: "auto"                # auto, cpu, cuda
+  compute_type: "int8"          # float16, int8 (int8 good for Apple Silicon)
   language: "it"
   beam_size: 1
-  vad_filter: false                  # whisper's built-in VAD for better accuracy
+  vad_filter: false             # whisper's built-in VAD for better accuracy
 
 agent:
   provider: "ollama"
   base_url: "http://localhost:11434"
   model: "llama3.1:8b"
   max_tokens: 500
+  streaming: true               # true = speak sentence-by-sentence as LLM generates (lower latency)
   system_prompt: |
     Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. 
     Rispondi in italiano, in modo conciso e naturale.
@@ -55,11 +56,11 @@ tts:
   model_path: "models/piper/it_IT-paola-medium.onnx"
   model_config: "models/piper/it_IT-paola-medium.onnx.json"
   speaker_id: 0
-  length_scale: 1.0 # speech speed (lower = faster)
-  sentence_silence: 0.5  # pause between sentences in seconds
+  length_scale: 1.0             # speech speed (lower = faster)
+  sentence_silence: 0.5         # pause between sentences in seconds
 
 conversation:
-  follow_up_timeout_sec: 5.0         # seconds to wait for follow-up after response (0 = disabled)
+  follow_up_timeout_sec: 5.0    # seconds to wait for follow-up after response (0 = disabled)
 
 tools:
   knowledge_base_path: "data/knowledge.json"

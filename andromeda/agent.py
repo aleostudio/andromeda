@@ -6,9 +6,13 @@ import asyncio
 import inspect
 import json
 import logging
+import re
 import httpx
 
 logger = logging.getLogger(__name__)
+
+# Regex to split text on sentence boundaries (keeps the delimiter attached)
+_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
 
 
 # Conversational AI agent
@@ -29,27 +33,13 @@ class AIAgent:
 
 
     def register_tool(self, tool_definition: dict, handler: callable) -> None:
-        """Register a tool for the agent to use.
-
-        Args:
-            tool_definition: Ollama/OpenAI-style tool schema:
-                {
-                    "type": "function",
-                    "function": {
-                        "name": "get_weather",
-                        "description": "Get weather for a city",
-                        "parameters": { ... JSON Schema ... }
-                    }
-                }
-            handler: Async callable that receives tool arguments dict and returns result string
-        """
         self._tools.append(tool_definition)
         func_name = tool_definition["function"]["name"]
         self._tool_handlers[func_name] = handler
         logger.info("Registered tool: %s", func_name)
 
 
-    # Send user text to Ollama and return response
+    # Send user text to Ollama and return response (non-streaming, used as fallback)
     async def process(self, user_text: str) -> str:
         if self._client is None:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
@@ -77,6 +67,135 @@ class AIAgent:
             return "Si è verificato un errore. Riprova."
 
 
+    # Streaming version: push sentences to queue as they are generated
+    async def process_streaming(self, user_text: str, sentence_queue: asyncio.Queue) -> str:
+        if self._client is None:
+            raise RuntimeError("Agent not initialized. Call initialize() first.")
+
+        self._conversation.append({"role": "user", "content": user_text})
+
+        if len(self._conversation) > self._max_history:
+            self._conversation = self._conversation[-self._max_history:]
+
+        try:
+            # First, handle tool calls (non-streaming, tools need full response)
+            full_text = await self._complete_with_tools_streaming(sentence_queue)
+            self._conversation.append({"role": "assistant", "content": full_text})
+            logger.info("Agent response (streamed): %s", full_text[:100])
+            return full_text
+
+        except httpx.ConnectError:
+            logger.error("Cannot connect to Ollama at %s. Is it running?", self._cfg.base_url)
+            msg = "Non riesco a connettermi al modello. Verifica che Ollama sia in esecuzione."
+            await sentence_queue.put(msg)
+            return msg
+        except httpx.TimeoutException:
+            logger.error("Ollama request timed out")
+            msg = "La richiesta ha impiegato troppo tempo. Riprova."
+            await sentence_queue.put(msg)
+            return msg
+        except Exception:
+            logger.exception("Agent processing failed")
+            msg = "Si è verificato un errore. Riprova."
+            await sentence_queue.put(msg)
+            return msg
+        finally:
+            # Signal end of stream
+            await sentence_queue.put(None)
+
+
+    # Handle tool calling loop, then stream the final text response
+    async def _complete_with_tools_streaming(self, sentence_queue: asyncio.Queue) -> str:
+        messages = [
+            {"role": "system", "content": self._cfg.system_prompt},
+            *self._conversation,
+        ]
+
+        # Tool calling loop (non-streaming — tools need the full response to parse)
+        for _ in range(5):
+            message = await self._chat_request(messages)
+            tool_calls = message.get("tool_calls", [])
+
+            if not tool_calls:
+                break
+
+            messages.append(message)
+            for tool_call in tool_calls:
+                result = await self._execute_tool_call(tool_call)
+                messages.append({"role": "tool", "content": result})
+
+        # Now stream the final text response sentence by sentence
+        return await self._stream_response(messages, sentence_queue)
+
+
+    # Stream response from Ollama, splitting into sentences and pushing to queue
+    async def _stream_response(self, messages: list[dict], sentence_queue: asyncio.Queue) -> str:
+        payload = self._build_payload(messages, stream=True)
+        full_text = ""
+        buffer = ""
+
+        async with self._client.stream("POST", "/api/chat", json=payload) as response:
+            response.raise_for_status()
+            async for token in self._iter_tokens(response):
+                full_text += token
+                buffer += token
+                buffer = await self._flush_sentences(buffer, sentence_queue)
+
+        await self._flush_remainder(buffer, sentence_queue)
+        return full_text
+
+
+    # Build Ollama API payload
+    def _build_payload(self, messages: list[dict], stream: bool = False) -> dict:
+        payload: dict = {
+            "model": self._cfg.model,
+            "messages": messages,
+            "stream": stream,
+            "options": {"num_predict": self._cfg.max_tokens},
+        }
+        if self._tools:
+            payload["tools"] = self._tools
+        return payload
+
+
+    # Yield content tokens from a streaming response, skipping empty/invalid chunks
+    @staticmethod
+    async def _iter_tokens(response: httpx.Response):
+        async for line in response.aiter_lines():
+            if not line.strip():
+                continue
+            try:
+                chunk = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            token = chunk.get("message", {}).get("content", "")
+            if token:
+                yield token
+
+
+    # Push complete sentences from buffer to queue, return remaining text
+    @staticmethod
+    async def _flush_sentences(buffer: str, queue: asyncio.Queue) -> str:
+        sentences = _SENTENCE_RE.split(buffer)
+        if len(sentences) <= 1:
+            return buffer
+        for sentence in sentences[:-1]:
+            stripped = sentence.strip()
+            if stripped:
+                logger.debug("Streaming sentence: %s", stripped)
+                await queue.put(stripped)
+        return sentences[-1]
+
+
+    # Push any remaining text in buffer to queue
+    @staticmethod
+    async def _flush_remainder(buffer: str, queue: asyncio.Queue) -> None:
+        remainder = buffer.strip()
+        if remainder:
+            logger.debug("Streaming final: %s", remainder)
+            await queue.put(remainder)
+
+
     # Run completion loop, handling tool calls until we get a text response
     async def _complete_with_tools(self) -> str:
         messages = [
@@ -99,17 +218,9 @@ class AIAgent:
         return "Mi dispiace, la richiesta è troppo complessa. Puoi riformulare?"
 
 
-    # Send a single chat request to Ollama
+    # Send a single chat request to Ollama (non-streaming)
     async def _chat_request(self, messages: list[dict]) -> dict:
-        payload: dict = {
-            "model": self._cfg.model,
-            "messages": messages,
-            "stream": False,
-            "options": {"num_predict": self._cfg.max_tokens},
-        }
-        if self._tools:
-            payload["tools"] = self._tools
-
+        payload = self._build_payload(messages, stream=False)
         response = await self._client.post("/api/chat", json=payload)
         response.raise_for_status()
         return response.json().get("message", {})
@@ -157,7 +268,7 @@ class AIAgent:
         logger.info("Conversation history cleared")
 
 
-    # Close HTTP client
+    # Close HTTP client
     async def close(self) -> None:
         if self._client:
             await self._client.aclose()

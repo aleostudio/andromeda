@@ -192,7 +192,7 @@ class VoiceAssistant:
         return AssistantState.PROCESSING
 
 
-    # PROCESSING: STT transcription + AI agent call
+    # PROCESSING: STT transcription + AI response + TTS
     async def _handle_processing(self, _state: AssistantState) -> AssistantState:
         # Transcribe
         text = await self._stt.transcribe(self._recorded_audio)
@@ -200,29 +200,46 @@ class VoiceAssistant:
         if not text.strip():
             logger.info("Empty transcription, back to IDLE")
             self._is_follow_up = False
-
             return AssistantState.IDLE
 
         logger.info("User said: %s", text)
 
-        # AI response
-        self._response_text = await self._agent.process(text)
+        self._audio.mute()
+        try:
+            if self._cfg.agent.streaming:
+                await self._process_streaming(text)
+            else:
+                await self._process_standard(text)
+        finally:
+            self._audio.unmute()
 
         return AssistantState.SPEAKING
 
 
-    # SPEAKING: TTS playback, then listen for follow-up
+    # Standard mode: wait for full response, then speak
+    async def _process_standard(self, text: str) -> None:
+        self._response_text = await self._agent.process(text)
+        await self._tts.speak(self._response_text)
+
+
+    # Streaming mode: speak sentence-by-sentence as LLM generates
+    async def _process_streaming(self, text: str) -> None:
+        sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        agent_task = asyncio.create_task(self._agent.process_streaming(text, sentence_queue))
+        tts_task = asyncio.create_task(self._tts.speak_streamed(sentence_queue))
+
+        self._response_text = await agent_task
+        await tts_task
+
+
+    # SPEAKING: After TTS is done, decide whether to listen for follow-up
     async def _handle_speaking(self, _state: AssistantState) -> AssistantState:
-        self._audio.mute()
-        try:
-            await self._tts.speak(self._response_text)
-        finally:
-            self._audio.unmute()
+        # yield to event loop (handler must be async for state machine)
+        await asyncio.sleep(0)
 
         # After speaking, listen for follow-up instead of going back to IDLE
         if self._cfg.conversation.follow_up_timeout_sec > 0:
             self._is_follow_up = True
-
             return AssistantState.LISTENING
 
         return AssistantState.IDLE
