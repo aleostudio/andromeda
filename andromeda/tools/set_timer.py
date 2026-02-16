@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
 import asyncio
 import logging
 import time

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
 import warnings
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 

@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
 from typing import Any, Callable, Coroutine, TypeAlias
 from enum import Enum, auto
 import asyncio

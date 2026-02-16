@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
 from pathlib import Path
 from andromeda.config import AudioConfig, WakeWordConfig
 import logging

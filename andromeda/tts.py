@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
 from andromeda.config import AudioConfig, TTSConfig
 import asyncio
 import io

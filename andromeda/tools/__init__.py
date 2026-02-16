@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
 from andromeda.agent import AIAgent
 from andromeda.config import ToolsConfig
 from andromeda.feedback import AudioFeedback

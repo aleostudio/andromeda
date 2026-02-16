@@ -10,6 +10,7 @@ Smart home assistant completely **offline** using **openWakeWord** for wake word
 - [Configuration](#configuration)
 - [Run Andromeda](#run-andromeda)
 - [Debug in VSCode](#debug-in-vscode)
+- [License](#license)
 
 ## Architecture
 
@@ -22,13 +23,10 @@ Mic ──▶ Buffer ──▶ Wake Word (OpenWakeWord)
            (webrtcvad + noisereduce)
                       │
               [SILENCE TIMEOUT]
-                      │
                       ▼
                 STT (Whisper)
-                      │
                       ▼
               AI agent (Ollama) ──▶ Tool calling
-                      │
                       ▼
                  TTS (Piper) ──▶ Speaker
 
@@ -148,6 +146,14 @@ To debug your Python microservice you need to:
 
 - Put some breakpoint in the code, then press the **green play button**
 - Call the API to debug
+
+[↑ index](#index)
+
+---
+
+## License
+
+This project is licensed under the MIT License.
 
 [↑ index](#index)
 

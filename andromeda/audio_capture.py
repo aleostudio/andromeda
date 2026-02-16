@@ -1,3 +1,6 @@
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
 from enum import Enum, auto
 from typing import Callable
 from andromeda.config import AudioConfig, NoiseConfig
