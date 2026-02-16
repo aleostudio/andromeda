@@ -152,6 +152,7 @@ class VoiceAssistant:
         min_samples = int(self._cfg.vad.min_recording_sec * self._cfg.audio.sample_rate)
         if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
             logger.info("Recording too short or no speech detected, back to IDLE")
+            await self._speak_error("Non ho sentito nulla. Riprova.")
             return AssistantState.IDLE
 
         self._feedback.play("done")
@@ -201,6 +202,7 @@ class VoiceAssistant:
         if not text.strip():
             logger.info("Empty transcription, back to IDLE")
             self._is_follow_up = False
+            await self._speak_error("Non ho capito. Puoi ripetere?")
             return AssistantState.IDLE
 
         logger.info("User said: %s", text)
@@ -259,12 +261,20 @@ class VoiceAssistant:
         return AssistantState.IDLE
 
 
-    # ERROR: Play error sound and return to IDLE
+    # ERROR: Speak error message and return to IDLE
     async def _handle_error(self, _state: AssistantState) -> AssistantState:
-        self._feedback.play_blocking("error")
-        await asyncio.sleep(0.5)
-
+        await self._speak_error("Si è verificato un errore. Riprova.")
         return AssistantState.IDLE
+
+
+    # Speak a short error message to the user
+    async def _speak_error(self, message: str) -> None:
+        logger.warning("Spoken error: %s", message)
+        self._audio.mute()
+        try:
+            await self._tts.speak(message)
+        finally:
+            self._audio.unmute()
 
 
     # Release all resources. Unblocks threads waiting on events
