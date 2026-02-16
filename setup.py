@@ -84,18 +84,29 @@ def main() -> None:
 
     # Whisper model download
     print("")
-    print("[*] Downloading Whisper model large-v3 (STT)...")
+    print("[*] Downloading Whisper model medium and large-v3 (STT)...")
     print("    This will download ~3GB on first run")
-    print("    The model will be cached in ~/.cache/huggingface/")
+    print("    Models will be cached in ~/.cache/huggingface/")
+    result = run(
+        f'{python_bin()} -c "from faster_whisper import WhisperModel; '
+        f"WhisperModel('medium', device='auto', compute_type='int8')\"",
+        check=False,
+    )
+    if result.returncode == 0:
+        print("    Whisper model medium ready")
+    else:
+        print("    Whisper model medium will download on first run")
+        print(f"{result.stderr[:200]}")
+
     result = run(
         f'{python_bin()} -c "from faster_whisper import WhisperModel; '
         f"WhisperModel('large-v3', device='auto', compute_type='int8')\"",
         check=False,
     )
     if result.returncode == 0:
-        print("    Whisper model ready")
+        print("    Whisper model large-v3 ready")
     else:
-        print("    Whisper model will download on first run")
+        print("    Whisper model large-v3 will download on first run")
         print(f"{result.stderr[:200]}")
 
     # OpenWakeWord model
