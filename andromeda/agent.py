@@ -1,30 +1,30 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
-from andromeda.config import AgentConfig
+from andromeda.config import AgentConfig, ConversationConfig
 import asyncio
 import inspect
 import json
 import logging
 import re
+import time
 import httpx
 
 logger = logging.getLogger(__name__)
-
-# Regex to split text on sentence boundaries (keeps the delimiter attached)
-_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
 
 
 # Conversational AI agent
 class AIAgent:
 
-    def __init__(self, agent_cfg: AgentConfig) -> None:
+    def __init__(self, agent_cfg: AgentConfig, conversation_cfg: ConversationConfig | None = None) -> None:
         self._cfg = agent_cfg
+        self._conversation_cfg = conversation_cfg
         self._client: httpx.AsyncClient | None = None
         self._conversation: list[dict] = []
         self._tools: list[dict] = []
         self._tool_handlers: dict[str, callable] = {}
         self._max_history: int = 20  # Keep last N turns
+        self._last_interaction: float = 0.0  # monotonic timestamp of last interaction
 
 
     def initialize(self) -> None:
@@ -39,10 +39,26 @@ class AIAgent:
         logger.info("Registered tool: %s", func_name)
 
 
+    # Clear stale history if user has been inactive too long
+    def _check_history_timeout(self) -> None:
+        if not self._conversation_cfg or self._conversation_cfg.history_timeout_sec <= 0:
+            return
+        if self._last_interaction == 0:
+            return
+
+        elapsed = time.monotonic() - self._last_interaction
+        if elapsed > self._conversation_cfg.history_timeout_sec:
+            logger.info("History timeout (%.0fs idle), clearing conversation", elapsed)
+            self._conversation.clear()
+
+
     # Send user text to Ollama and return response (non-streaming, used as fallback)
     async def process(self, user_text: str) -> str:
         if self._client is None:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
+
+        self._check_history_timeout()
+        self._last_interaction = time.monotonic()
 
         self._conversation.append({"role": "user", "content": user_text})
 
@@ -71,6 +87,9 @@ class AIAgent:
     async def process_streaming(self, user_text: str, sentence_queue: asyncio.Queue) -> str:
         if self._client is None:
             raise RuntimeError("Agent not initialized. Call initialize() first.")
+
+        self._check_history_timeout()
+        self._last_interaction = time.monotonic()
 
         self._conversation.append({"role": "user", "content": user_text})
 
@@ -176,7 +195,10 @@ class AIAgent:
     # Push complete sentences from buffer to queue, return remaining text
     @staticmethod
     async def _flush_sentences(buffer: str, queue: asyncio.Queue) -> str:
+        # Regex to split text on sentence boundaries (keeps the delimiter attached)
+        _SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
         sentences = _SENTENCE_RE.split(buffer)
+
         if len(sentences) <= 1:
             return buffer
         for sentence in sentences[:-1]:
@@ -184,6 +206,7 @@ class AIAgent:
             if stripped:
                 logger.debug("Streaming sentence: %s", stripped)
                 await queue.put(stripped)
+
         return sentences[-1]
 
 

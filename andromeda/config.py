@@ -88,6 +88,7 @@ class FeedbackConfig:
 @dataclass(frozen=True)
 class ConversationConfig:
     follow_up_timeout_sec: float = 5.0  # seconds to wait for follow-up after TTS ends
+    history_timeout_sec: float = 300.0  # clear conversation history after N seconds of inactivity (0 = never)
 
 
 @dataclass(frozen=True)

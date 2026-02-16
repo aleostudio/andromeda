@@ -36,7 +36,7 @@ class VoiceAssistant:
         self._wake_word = WakeWordDetector(config.audio, config.wake_word)
         self._vad = VoiceActivityDetector(config.audio, config.vad)
         self._stt = SpeechRecognizer(config.stt)
-        self._agent = AIAgent(config.agent)
+        self._agent = AIAgent(config.agent, config.conversation)
         self._tts = TextToSpeech(config.audio, config.tts)
         self._feedback = AudioFeedback(config.audio, config.feedback)
 

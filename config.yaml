@@ -61,6 +61,7 @@ tts:
 
 conversation:
   follow_up_timeout_sec: 5.0    # seconds to wait for follow-up after response (0 = disabled)
+  history_timeout_sec: 300.0    # clear conversation history after N seconds of inactivity (0 = never)
 
 tools:
   knowledge_base_path: "data/knowledge.json"
