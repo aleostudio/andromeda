@@ -4,13 +4,13 @@
 from andromeda.agent import AIAgent
 from andromeda.config import ToolsConfig
 from andromeda.feedback import AudioFeedback
-from andromeda.tools import (get_datetime, get_weather, knowledge_base, set_timer, system_control)
+from andromeda.tools import (get_datetime, get_latest_news, get_weather, knowledge_base, set_timer, system_control)
 import logging
 
 logger = logging.getLogger(__name__)
 
 
-_TOOLS = [get_datetime, get_weather, set_timer, system_control, knowledge_base]
+_TOOLS = [get_datetime, get_latest_news, get_weather, set_timer, system_control, knowledge_base]
 
 
 def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFeedback) -> None:

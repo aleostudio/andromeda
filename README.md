@@ -9,6 +9,7 @@ Smart home assistant completely **offline** using **openWakeWord** for wake word
 - [Prerequisites](#prerequisites)
 - [Configuration](#configuration)
 - [Run Andromeda](#run-andromeda)
+- [Write new tool](#write-new-tool)
 - [Debug in VSCode](#debug-in-vscode)
 - [License](#license)
 
@@ -110,6 +111,78 @@ IDLE ──▶ │ wake word  │ ──▶ LISTENING ──▶ │   your   │
 └──────────────────── │ cancel/error │
                       └──────────────┘
 ```
+
+[↑ index](#index)
+
+---
+
+## Write new tool
+
+Adding a new tool on Andromeda is super easy. First create your `function_name.py`
+into `/andromeda/tools` folder (e.g. `/andromeda/tools/get_news.py`).
+
+The file must be similar to this following structure. It must have:
+
+- A `DEFINITION` constant with:
+  - A clear short name (get_news)
+  - A clear description: this text will be used by the LLM to understand the capability
+  - A list of parameters (optional): what LLM should pass to the tool
+- A `handler` method with the tool logic
+
+The handler **must return a readable text**.
+
+```python
+# Copyright (c) 2026 Alessandro Orrù
+# Licensed under MIT
+
+from datetime import datetime
+import locale
+import logging
+
+logger = logging.getLogger(__name__)
+
+
+DEFINITION = {
+    "type": "function",
+    "function": {
+        "name": "get_news",
+        "description": (
+            "Recupera le ultime notizie dal sito XXX. "
+            "Usa questo strumento quando l'utente chiede le ultime notizie, "
+            "cosa sta succedendo nel mondo o le news del giorno."
+        ),
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "category": {
+                    "type": "string",
+                    "description": (
+                        "Categoria di notizie da cercare. "
+                        "Valori possibili: "
+                        "'italia', 'mondo', 'politica', 'economia'."
+                    ),
+                    "enum": [
+                        "homepage", "italia", "mondo", "politica", "economia",
+                    ],
+                    "default": "homepage",
+                }
+            },
+            "required": [],
+        },
+    },
+}
+
+
+def handler(_args: dict) -> str:
+    
+    # YOUR LOGIC HERE
+
+    return f"Your tool result"
+```
+
+Save your file and add the reference in `/andromeda/tools/__init__.py`.
+
+Restart your assistant and enjoy!
 
 [↑ index](#index)
 
