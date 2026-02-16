@@ -16,7 +16,6 @@ logger = logging.getLogger(__name__)
 class AudioRouteMode(Enum):
     NORMAL = auto()     # frames go to all listeners (wake word + VAD)
     MUTED = auto()      # frames dropped entirely
-    STOP_ONLY = auto()  # frames go only to stop-word listener
 
 
 # Continuous audio capture from microphone with ring buffer
@@ -37,7 +36,6 @@ class AudioCapture:
 
         # Callbacks
         self._on_audio_frame: list[Callable[[bytes], None]] = []
-        self._on_stop_word_frame: list[Callable[[bytes], None]] = []
 
         self._lock = threading.Lock()
         self._route_mode = AudioRouteMode.NORMAL
@@ -46,11 +44,6 @@ class AudioCapture:
     # Register callback for each audio frame (for wake word / VAD)
     def on_audio_frame(self, callback: Callable[[bytes], None]) -> None:
         self._on_audio_frame.append(callback)
-
-
-    # Register callback for stop-word frames (active only in STOP_ONLY mode)
-    def on_stop_word_frame(self, callback: Callable[[bytes], None]) -> None:
-        self._on_stop_word_frame.append(callback)
 
 
     # Start audio capture stream
@@ -83,11 +76,6 @@ class AudioCapture:
     # Unmute input (normal mode)
     def unmute(self) -> None:
         self._route_mode = AudioRouteMode.NORMAL
-
-
-    # Route audio only to stop-word listeners
-    def set_route_mode_stop_only(self) -> None:
-        self._route_mode = AudioRouteMode.STOP_ONLY
 
 
     # Start collecting audio into recording buffer
@@ -154,9 +142,7 @@ class AudioCapture:
         if status:
             logger.warning("Audio status: %s", status)
 
-        mode = self._route_mode
-
-        if mode == AudioRouteMode.MUTED:
+        if self._route_mode == AudioRouteMode.MUTED:
             return
 
         frame_bytes = indata.tobytes()
@@ -165,15 +151,6 @@ class AudioCapture:
             self._ring_buffer.append(frame_bytes)
             if self._is_recording:
                 self._recording_buffer.append(frame_bytes)
-
-        if mode == AudioRouteMode.STOP_ONLY:
-            # Only dispatch to stop-word listeners
-            for cb in self._on_stop_word_frame:
-                try:
-                    cb(frame_bytes)
-                except Exception:
-                    logger.exception("Stop-word frame callback error")
-            return
 
         # Dispatch to all listeners (wake word detector, VAD)
         for cb in self._on_audio_frame:

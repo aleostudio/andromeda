@@ -91,11 +91,6 @@ class ToolsConfig:
     timer_max_sec: int = 3600
 
 
-@dataclass(frozen=True)
-class StopWordConfig:
-    enabled: bool = True
-    energy_multiplier: float = 1.5
-
 
 @dataclass(frozen=True)
 class LoggingConfig:
@@ -112,7 +107,7 @@ class AppConfig:
     agent: AgentConfig = field(default_factory=AgentConfig)
     tts: TTSConfig = field(default_factory=TTSConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
-    stop_word: StopWordConfig = field(default_factory=StopWordConfig)
+
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
@@ -136,7 +131,7 @@ class AppConfig:
             agent=AgentConfig(**raw.get("agent", {})),
             tts=TTSConfig(**raw.get("tts", {})),
             tools=ToolsConfig(**raw.get("tools", {})),
-            stop_word=StopWordConfig(**raw.get("stop_word", {})),
+
             feedback=FeedbackConfig(**raw.get("feedback", {})),
             logging=LoggingConfig(**raw.get("logging", {})),
         )

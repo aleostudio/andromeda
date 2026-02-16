@@ -16,7 +16,6 @@ from andromeda.config import AppConfig
 from andromeda.feedback import AudioFeedback
 from andromeda.state_machine import AssistantState, StateMachine
 from andromeda.stt import SpeechRecognizer
-from andromeda.stop_word import StopWordListener
 from andromeda.tools import register_all_tools
 from andromeda.tts import TextToSpeech
 from andromeda.vad import VoiceActivityDetector
@@ -39,7 +38,6 @@ class VoiceAssistant:
         self._agent = AIAgent(config.agent)
         self._tts = TextToSpeech(config.audio, config.tts)
         self._feedback = AudioFeedback(config.audio, config.feedback)
-        self._stop_word = StopWordListener(config.audio, config.wake_word, config.stop_word)
 
         # State machine
         self._sm = StateMachine()
@@ -68,7 +66,7 @@ class VoiceAssistant:
         logger.info("|          Smart home assistant completely offline            |")
         logger.info("|            alessandro.orru <at> aleostudio.com              |")
         logger.info("'-------------------------------------------------------------'")
-        logger.info("")                                     
+        logger.info("")
         logger.info("Initializing home assistant...")
 
         self._feedback.initialize()
@@ -80,17 +78,9 @@ class VoiceAssistant:
         # Register tools
         register_all_tools(self._agent, self._cfg.tools, self._feedback)
 
-        # Initialize stop word listener (reuses wake word model pattern)
-        if self._cfg.stop_word.enabled:
-            self._stop_word.initialize()
-
         # Wire audio callbacks
         self._audio.on_audio_frame(self._wake_word.process_frame)
         self._audio.on_audio_frame(self._vad.process_frame)
-
-        # Wire stop word listener to dedicated callback
-        if self._cfg.stop_word.enabled:
-            self._audio.on_stop_word_frame(self._stop_word.process_frame)
 
         logger.info("All components initialized")
 
@@ -179,84 +169,14 @@ class VoiceAssistant:
         return AssistantState.SPEAKING
 
 
-    # SPEAKING: TTS playback with barge-in support via stop word
+    # SPEAKING: TTS playback, mic muted to avoid echo
     async def _handle_speaking(self, _state: AssistantState) -> AssistantState:
-        if self._cfg.stop_word.enabled:
-            return await self._handle_speaking_with_bargein()
-
-        # Original behavior: mute mic during playback
         self._audio.mute()
         try:
             await self._tts.speak(self._response_text)
         finally:
             self._audio.unmute()
         return AssistantState.IDLE
-
-
-    # SPEAKING with barge-in: listen for stop word while TTS plays
-    async def _handle_speaking_with_bargein(self) -> AssistantState:
-        self._audio.set_route_mode_stop_only()
-        stop_energy = self._speech_energy * self._cfg.stop_word.energy_multiplier
-        self._stop_word.start(energy_threshold=stop_energy)
-
-        try:
-            speak_task = asyncio.create_task(self._tts.speak(self._response_text))
-            stop_future = asyncio.get_event_loop().run_in_executor(
-                None, lambda: self._stop_word.wait_for_detection(timeout=None),
-            )
-            stop_task = asyncio.ensure_future(stop_future)
-
-            done, pending = await asyncio.wait(
-                {speak_task, stop_task},
-                return_when=asyncio.FIRST_COMPLETED,
-            )
-
-            if stop_task in done:
-                await self._interrupt_tts(speak_task)
-            else:
-                self._check_speak_result(speak_task)
-
-            self._stop_word.stop()
-            await self._cancel_pending(pending)
-
-        except Exception:
-            logger.exception("Barge-in handler error")
-            self._stop_word.stop()
-        finally:
-            self._audio.unmute()
-
-        return AssistantState.IDLE
-
-
-    # Interrupt TTS playback when stop word is detected
-    async def _interrupt_tts(self, speak_task: asyncio.Task) -> None:
-        logger.info("Stop word detected, interrupting TTS")
-        self._tts.stop_playback()
-        speak_task.cancel()
-        try:
-            await speak_task
-        except (asyncio.CancelledError, Exception):
-            pass
-        self._feedback.play("done")
-
-
-    # Check if TTS completed with errors
-    def _check_speak_result(self, speak_task: asyncio.Task) -> None:
-        if speak_task.done() and not speak_task.cancelled():
-            exc = speak_task.exception()
-            if exc:
-                logger.error("TTS playback error: %s", exc)
-
-
-    # Cancel and await remaining async tasks
-    @staticmethod
-    async def _cancel_pending(pending: set[asyncio.Task]) -> None:
-        for task in pending:
-            task.cancel()
-            try:
-                await task
-            except (asyncio.CancelledError, Exception):
-                pass
 
 
     # ERROR: Play error sound and return to IDLE
@@ -270,7 +190,6 @@ class VoiceAssistant:
     # Release all resources. Unblocks threads waiting on events
     async def shutdown(self) -> None:
         self._wake_word.shutdown()
-        self._stop_word.stop()
         await self._agent.close()
 
 

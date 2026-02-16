@@ -13,27 +13,27 @@ wake_word:
   threshold: 0.5                     # detection confidence threshold (0.0 - 1.0)
 
 vad:
-  aggressiveness: 2                  # 0-3, higher = more aggressive noise filtering
-  silence_timeout_sec: 2.0
+  aggressiveness: 3                  # 0-3, higher = more aggressive noise filtering
+  silence_timeout_sec: 1.5
   speech_pad_ms: 300                 # padding before/after speech segments
   max_recording_sec: 30
   min_recording_sec: 0.5
-  energy_threshold_factor: 0.3       # threshold = calibrated_speech_energy * this factor
-  energy_decay_rate: 0.95            # per-second decay of energy threshold
+  energy_threshold_factor: 0.6       # threshold = calibrated_speech_energy * this factor
+  energy_decay_rate: 0.98            # per-second decay of energy threshold
 
 noise:
-  enabled: true
+  enabled: false
   stationary: true                   # true for constant background noise (fan, AC)
   prop_decrease: 0.75                # how much to reduce noise (0.0-1.0)
 
 stt:
   engine: "faster-whisper"
-  model_size: "large-v3"             # tiny, base, small, medium, large-v3
+  model_size: "medium"               # tiny, base, small, medium, large-v3
   device: "auto"                     # auto, cpu, cuda
   compute_type: "int8"               # float16, int8 (int8 good for Apple Silicon)
   language: "it"
-  beam_size: 5
-  vad_filter: true                   # whisper's built-in VAD for better accuracy
+  beam_size: 1
+  vad_filter: false                  # whisper's built-in VAD for better accuracy
 
 agent:
   provider: "ollama"
@@ -63,9 +63,6 @@ tools:
   weather_timeout_sec: 10.0
   timer_max_sec: 3600
 
-stop_word:
-  enabled: true
-  energy_multiplier: 1.5  # energy gate = calibrated_speech * this (filters TTS echo)
 
 feedback:
   wake_sound: "sounds/wake.wav"
