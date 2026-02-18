@@ -118,9 +118,14 @@ At this point, ensure you have **Ollama model** installed, with:
 ollama pull llama3.1:8b
 ```
 
-If you are running Andromeda on a **Mac Silicon** and you have at least **24gb** of ram, you can also safely use `gpt-oss:20b`.
+If you are running Andromeda on a **Mac Silicon** and you have at least **24gb** of ram, through `ollama pull`, you can also safely use models like:
 
-Once setup is finished, customize your `config.yaml` file.
+- `mistral-nemo:12b`
+- `glm-4.7-flash:latest`
+- `gpt-oss:20b`
+- ``
+
+Once setup is finished, customize your `config.yaml` file and update your model if changed.
 
 ### Configuration reference
 
