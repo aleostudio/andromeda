@@ -122,7 +122,7 @@ If you are running Andromeda on a **Mac Silicon** and you have at least **24gb**
 
 - `mistral-nemo:12b`
 - `glm-4.7-flash:latest`
-- `gpt-oss:20b`
+- `gpt-oss:20b` (recommended)
 - ``
 
 Once setup is finished, customize your `config.yaml` file and update your model if changed.

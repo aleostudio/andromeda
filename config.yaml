@@ -38,7 +38,7 @@ stt:
 agent:
   provider: "ollama"
   base_url: "http://localhost:11434"
-  model: "llama3.1:8b"
+  model: "gpt-oss:20b"
   max_tokens: 500
   streaming: true               # true = speak sentence-by-sentence as LLM generates (lower latency)
   system_prompt: |
