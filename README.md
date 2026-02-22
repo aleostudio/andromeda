@@ -22,26 +22,31 @@ Smart home assistant completely **offline** using **openWakeWord** for wake word
 Mic ──▶ Buffer ──▶ Wake Word (OpenWakeWord)
                       │
                  [TRIGGERED]
+                      │
                       ▼
             VAD + Recording Buffer
            (webrtcvad + energy gate)
                       │
               [SILENCE TIMEOUT]
+                      │
                       ▼
                 STT (Whisper)
                       │
               ┌───────┴───────┐
               │               │
-       Fast Intents     AI Agent (Ollama)
-       (regex match)     ──▶ Tool calling
+             [1]             [2]
+        Fast Intents   AI Agent (Ollama)
+        (regex match)  with tool calling
               │               │
               └───────┬───────┘
+                      │
                       ▼
-               TTS (Piper) ──▶ Speaker
+           TTS (Piper) ──▶ Speaker
                       │
               [FOLLOW-UP WAIT]
+                      │
                       ▼
-              Listen again or IDLE
+            Listen again or IDLE
 ```
 
 [↑ index](#index)
