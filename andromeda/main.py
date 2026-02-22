@@ -355,6 +355,9 @@ class VoiceAssistant:
     # Monitor wake word during TTS playback to allow voice interruption
     async def _monitor_interrupt(self, tasks_to_cancel: list[asyncio.Task] | None = None) -> None:
         loop = asyncio.get_event_loop()
+        logger.debug("Interrupt monitoring active")
+        poll_count = 0
+
         while True:
             detected = await loop.run_in_executor(
                 None, lambda: self._wake_word.wait_for_detection(timeout=0.5),
@@ -367,6 +370,13 @@ class VoiceAssistant:
                     for task in tasks_to_cancel:
                         task.cancel()
                 return
+
+            # Periodically reset wake word model to prevent state accumulation
+            # from TTS audio echo picked up by the microphone
+            poll_count += 1
+            if poll_count % 10 == 0:
+                self._wake_word.reset_model_only()
+                logger.debug("Interrupt monitor: model reset (poll %d)", poll_count)
 
 
     # SPEAKING: After TTS is done, decide whether to listen for follow-up

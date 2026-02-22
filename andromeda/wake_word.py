@@ -3,6 +3,7 @@
 
 import logging
 import threading
+import time
 import numpy as np
 from pathlib import Path
 from andromeda.config import AudioConfig, WakeWordConfig
@@ -22,6 +23,7 @@ class WakeWordDetector:
         self._detected = threading.Event()
         self._shutdown = False
         self._lock = threading.Lock()
+        self._last_debug_log: float = 0.0
 
 
     # Download and load model
@@ -67,9 +69,17 @@ class WakeWordDetector:
                         self._model.reset()
 
                     return
+
+            # Periodic debug logging of max prediction score (every 3s)
+            now = time.monotonic()
+            if now - self._last_debug_log >= 3.0:
+                max_score = max(prediction.values()) if prediction else 0.0
+                if max_score > 0.01:
+                    logger.debug("Wake word max score: %.3f (threshold=%.2f)", max_score, self._wake_cfg.threshold)
+                self._last_debug_log = now
+
         except Exception:
-            # Never crash the audio callback thread
-            pass
+            logger.debug("Wake word prediction error", exc_info=True)
 
 
     # Block until wake word is detected. Returns True if detected, False on shutdown/timeout
@@ -87,6 +97,14 @@ class WakeWordDetector:
     # Reset detection state
     def reset(self) -> None:
         self._detected.clear()
+        if self._model:
+            with self._lock:
+                self._model.reset()
+
+
+    # Reset only the model internal state (preserves the detection event)
+    # Used during TTS playback to prevent state accumulation from echo audio
+    def reset_model_only(self) -> None:
         if self._model:
             with self._lock:
                 self._model.reset()

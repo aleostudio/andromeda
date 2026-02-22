@@ -157,6 +157,13 @@ class TextToSpeech:
                 _apply_fade_out(audio)
                 await loop.run_in_executor(None, lambda a=audio, sr=sample_rate: self._write_chunks(a, sr))
 
+                # Inter-sentence silence: gives natural pacing and creates a clean
+                # audio window for wake word detection (mic hears only the user)
+                if self._tts_cfg.sentence_silence > 0 and not self._stop_event.is_set():
+                    silence_len = int(sample_rate * self._tts_cfg.sentence_silence)
+                    silence = np.zeros(silence_len, dtype=np.float32)
+                    await loop.run_in_executor(None, lambda s=silence, sr=sample_rate: self._write_chunks(s, sr))
+
                 # Collect prefetched result for next iteration
                 prefetch_result = await self._collect_prefetch(prefetch_task)
                 prefetch_task = None
@@ -347,7 +354,8 @@ class TextToSpeech:
                 chunk = audio[i : i + chunk_size]
                 self._playback_stream.write(chunk.reshape(-1, 1))
             except Exception:
-                logger.warning("Audio stream write error at chunk %d", i)
+                if not self._stop_event.is_set():
+                    logger.warning("Audio stream write error at chunk %d", i)
                 break
 
 
