@@ -211,10 +211,9 @@ class VoiceAssistant:
         # Check minimum recording
         min_samples = int(self._cfg.vad.min_recording_sec * self._cfg.audio.sample_rate)
         if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
-            logger.info("Recording too short or no speech detected, back to IDLE")
+            logger.info("Recording too short or no speech detected, asking user to retry")
             await self._speak_error("Non ho sentito nulla. Riprova.")
-
-            return AssistantState.IDLE
+            return AssistantState.SPEAKING
 
         self._feedback.play("done")
 
@@ -264,10 +263,9 @@ class VoiceAssistant:
             text = await self._stt.transcribe(self._recorded_audio)
 
         if not text.strip():
-            logger.info("Empty transcription, back to IDLE")
-            self._is_follow_up = False
+            logger.info("Empty transcription, asking user to repeat")
             await self._speak_error("Non ho capito. Puoi ripetere?")
-            return AssistantState.IDLE
+            return AssistantState.SPEAKING
 
         logger.info("User said: %s", text)
 

@@ -26,7 +26,7 @@ class AssistantState(Enum):
 # Valid state transitions
 TRANSITIONS: dict[AssistantState, set[AssistantState]] = {
     AssistantState.IDLE: {AssistantState.LISTENING},
-    AssistantState.LISTENING: {AssistantState.PROCESSING, AssistantState.IDLE, AssistantState.ERROR},
+    AssistantState.LISTENING: {AssistantState.PROCESSING, AssistantState.SPEAKING, AssistantState.IDLE, AssistantState.ERROR},
     AssistantState.PROCESSING: {AssistantState.SPEAKING, AssistantState.IDLE, AssistantState.ERROR},
     AssistantState.SPEAKING: {AssistantState.IDLE, AssistantState.LISTENING, AssistantState.ERROR},
     AssistantState.ERROR: {AssistantState.IDLE},
