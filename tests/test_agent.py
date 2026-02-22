@@ -75,32 +75,32 @@ class TestParseToolArgs:
         assert result == {"city": "Roma", "country": "Italia"}
 
 
-class TestFlushSentences:
+class TestFlushClauses:
     @pytest.mark.asyncio
     async def test_no_split_single_fragment(self):
         queue = asyncio.Queue()
-        remainder = await AIAgent._flush_sentences("hello world", queue)
+        remainder = await AIAgent._flush_clauses("hello world", queue)
         assert remainder == "hello world"
         assert queue.empty()
 
     @pytest.mark.asyncio
     async def test_split_two_sentences(self):
         queue = asyncio.Queue()
-        remainder = await AIAgent._flush_sentences("Prima frase. Seconda frase", queue)
+        remainder = await AIAgent._flush_clauses("Prima frase. Seconda frase", queue)
         assert remainder == "Seconda frase"
         assert await queue.get() == "Prima frase."
 
     @pytest.mark.asyncio
     async def test_split_exclamation(self):
         queue = asyncio.Queue()
-        remainder = await AIAgent._flush_sentences("Ciao! Come stai", queue)
+        remainder = await AIAgent._flush_clauses("Ciao! Come stai", queue)
         assert remainder == "Come stai"
         assert await queue.get() == "Ciao!"
 
     @pytest.mark.asyncio
     async def test_split_question_mark(self):
         queue = asyncio.Queue()
-        remainder = await AIAgent._flush_sentences("Come va? Bene", queue)
+        remainder = await AIAgent._flush_clauses("Come va? Bene", queue)
         assert remainder == "Bene"
         assert await queue.get() == "Come va?"
 
@@ -108,7 +108,7 @@ class TestFlushSentences:
     async def test_multiple_sentences(self):
         queue = asyncio.Queue()
         text = "Prima. Seconda. Terza. Quarta"
-        remainder = await AIAgent._flush_sentences(text, queue)
+        remainder = await AIAgent._flush_clauses(text, queue)
         assert remainder == "Quarta"
         sentences = []
         while not queue.empty():
@@ -118,7 +118,7 @@ class TestFlushSentences:
     @pytest.mark.asyncio
     async def test_empty_string(self):
         queue = asyncio.Queue()
-        remainder = await AIAgent._flush_sentences("", queue)
+        remainder = await AIAgent._flush_clauses("", queue)
         assert remainder == ""
         assert queue.empty()
 

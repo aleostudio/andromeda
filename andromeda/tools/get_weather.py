@@ -2,12 +2,18 @@
 # Licensed under MIT
 
 import logging
+import time
 import httpx
+from andromeda.tools.http_client import get_client
 
 logger = logging.getLogger(__name__)
 
 
 _timeout_sec: float = 10.0
+
+# Result cache: maps city_name -> (result_str, timestamp)
+_cache: dict[str, tuple[str, float]] = {}
+_CACHE_TTL_SEC: float = 300.0  # 5 minutes
 
 # WMO weather codes to Italian descriptions
 _WMO_CODES = {
@@ -41,8 +47,7 @@ DEFINITION = {
         "name": "get_weather",
         "description": (
             "Ottieni il meteo corrente per una città. "
-            "Usa questo strumento quando l'utente chiede che tempo fa, la temperatura, "
-            "o le previsioni meteo."
+            "Usa questo strumento quando l'utente chiede che tempo fa, la temperatura, o le previsioni meteo."
         ),
         "parameters": {
             "type": "object",
@@ -68,37 +73,48 @@ async def handler(args: dict) -> str:
     if not city:
         return "Errore: nessuna città specificata."
 
+    # Check cache first
+    cache_key = city.lower()
+    cached = _cache.get(cache_key)
+    if cached is not None:
+        result, ts = cached
+        if (time.monotonic() - ts) < _CACHE_TTL_SEC:
+            logger.debug("Weather cache hit for '%s'", city)
+            return result
+
     try:
-        async with httpx.AsyncClient(timeout=_timeout_sec) as client:
-            # Geocode city name to coordinates
-            geo_resp = await client.get(
-                "https://geocoding-api.open-meteo.com/v1/search",
-                params={"name": city, "count": 1, "language": "it"},
-            )
-            geo_resp.raise_for_status()
-            geo_data = geo_resp.json()
+        client = get_client()
 
-            results = geo_data.get("results", [])
-            if not results:
-                return f"Non ho trovato la città '{city}'."
+        # Geocode city name to coordinates
+        geo_resp = await client.get(
+            "https://geocoding-api.open-meteo.com/v1/search",
+            params={"name": city, "count": 1, "language": "it"},
+            timeout=_timeout_sec,
+        )
+        geo_resp.raise_for_status()
+        geo_data = geo_resp.json()
 
-            loc = results[0]
-            lat, lon = loc["latitude"], loc["longitude"]
-            city_name = loc.get("name", city)
+        results = geo_data.get("results", [])
+        if not results:
+            return f"Non ho trovato la città '{city}'."
 
-            # Fetch current weather
-            weather_resp = await client.get(
-                "https://api.open-meteo.com/v1/forecast",
-                params={
-                    "latitude": lat,
-                    "longitude": lon,
-                    "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
-                    "timezone": "auto",
-                },
-            )
-            weather_resp.raise_for_status()
-            weather_data = weather_resp.json()
+        loc = results[0]
+        lat, lon = loc["latitude"], loc["longitude"]
+        city_name = loc.get("name", city)
 
+        # Fetch current weather
+        weather_resp = await client.get(
+            "https://api.open-meteo.com/v1/forecast",
+            params={
+                "latitude": lat,
+                "longitude": lon,
+                "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
+                "timezone": "auto",
+            },
+            timeout=_timeout_sec,
+        )
+        weather_resp.raise_for_status()
+        weather_data = weather_resp.json()
         current = weather_data.get("current", {})
         temp = current.get("temperature_2m", "N/D")
         humidity = current.get("relative_humidity_2m", "N/D")
@@ -106,12 +122,17 @@ async def handler(args: dict) -> str:
         code = current.get("weather_code", -1)
         condition = _WMO_CODES.get(code, "condizioni sconosciute")
 
-        return (
+        result = (
             f"Meteo a {city_name}: {condition}, "
             f"temperatura {temp}°C, "
             f"umidità {humidity}%, "
             f"vento {wind} km/h"
         )
+
+        # Cache the result
+        _cache[cache_key] = (result, time.monotonic())
+
+        return result
 
     except httpx.ConnectError:
         logger.error("Cannot connect to Open-Meteo API")

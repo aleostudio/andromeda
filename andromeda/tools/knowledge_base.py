@@ -9,6 +9,9 @@ logger = logging.getLogger(__name__)
 
 _store_path: str = "data/knowledge.json"
 
+# In-memory cache — avoids reading from disk on every access
+_cache: dict | None = None
+
 
 DEFINITION = {
     "type": "function",
@@ -49,25 +52,37 @@ DEFINITION = {
 
 
 def configure(store_path: str) -> None:
-    global _store_path
+    global _store_path, _cache
     _store_path = store_path
+    _cache = None
 
 
 def _load_store() -> dict:
+    global _cache
+    if _cache is not None:
+        return _cache
+
     path = Path(_store_path)
     if not path.exists():
-        return {}
+        _cache = {}
+        return _cache
     try:
-        return json.loads(path.read_text(encoding="utf-8"))
+        _cache = json.loads(path.read_text(encoding="utf-8"))
+        logger.debug("Knowledge base loaded from disk: %d entries", len(_cache))
+        return _cache
     except (json.JSONDecodeError, OSError):
         logger.warning("Failed to load knowledge base from %s", path)
-        return {}
+        _cache = {}
+        return _cache
 
 
 def _save_store(data: dict) -> None:
+    global _cache
     path = Path(_store_path)
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+    # Update in-memory cache after successful write
+    _cache = data
 
 
 def _action_save(store: dict, key: str, value: str) -> str:

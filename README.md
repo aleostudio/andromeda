@@ -58,21 +58,58 @@ After Andromeda responds, the assistant keeps listening for a **follow-up questi
 
 When enabled (`streaming: true` in config), Andromeda speaks **sentence-by-sentence** as the LLM generates text, significantly reducing perceived latency. A single audio stream is maintained across sentences with fade-out applied to prevent audio pops between fragments.
 
+### Clause-level streaming
+
+In streaming mode, Andromeda splits text at **clause boundaries** (commas, semicolons, colons) in addition to sentence boundaries. This produces more natural speech output with shorter time-to-first-audio, while ensuring each fragment is long enough (minimum 20 chars) to sound natural.
+
+### TTS cache and prefetch
+
+Frequently spoken phrases are cached in an **LRU cache** (max 64 entries) to avoid re-synthesizing them. Common error phrases are pre-warmed at startup. In streaming mode, the **next sentence is pre-synthesized** while the current one plays, reducing inter-sentence gaps.
+
 ### Fast intents
 
 Simple deterministic requests (time, date, volume control) are matched with **regex patterns** and executed instantly without involving the LLM. This makes common queries near-instant. Fast intents are configured in `andromeda/tools/__init__.py`.
+
+### Web search fallback
+
+When the LLM cannot answer a question, it can invoke the **web search tool** in two modes:
+
+- **Search mode** (`query`): searches DuckDuckGo and returns results with URLs
+- **Page visit mode** (`url`): fetches a specific page and extracts its text content
+
+The LLM can chain both modes: first search for the right site, then visit the page to read its content. The system checks internet connectivity first: if offline, it replies with a clear spoken message. No API keys required.
 
 ### Spoken errors
 
 All error conditions (no speech detected, empty transcription, processing failures) are communicated to the user through **spoken TTS messages** rather than failing silently.
 
-### Conversation history timeout
+### Conversation history timeout and compaction
 
-Conversation history is automatically cleared after a configurable period of inactivity (`history_timeout_sec`), preventing stale context from affecting new interactions.
+Conversation history is automatically cleared after a configurable period of inactivity (`history_timeout_sec`), preventing stale context from affecting new interactions. When conversations grow long (16+ turns), older messages are **summarized by the LLM** to save context while preserving key information.
 
 ### Adaptive energy gating
 
 The VAD uses an **adaptive energy threshold** calibrated from the wake word utterance. This filters out background noise while adapting to the speaker's volume. The threshold decays over time to handle changing conditions.
+
+### Adaptive noise reduction
+
+Noise reduction is applied **only when needed**: the system estimates the Signal-to-Noise Ratio (SNR) of each recording and only runs noise reduction when SNR is below 15 dB. This saves processing time on clean audio.
+
+### Performance metrics
+
+Every phase of the pipeline (STT, intent matching, LLM, TTS) is instrumented with **latency tracking**. Metrics include average, min, max and count, logged at the end of each session and exposed via the health check endpoint.
+
+### LLM pre-warm
+
+At startup, the Ollama model is **pre-loaded into memory** with a minimal request, eliminating the cold-start delay on the first user interaction.
+
+### Health check endpoint
+
+An optional lightweight **HTTP health check** server (`/`) returns JSON with current state, uptime, and performance metrics. Useful for monitoring in home automation setups.
+
+### Tool result caching
+
+Weather, news, and web search results are **cached with TTL** (5 min, 10 min, 5 min respectively) to avoid redundant API calls. The knowledge base is kept **in-memory** after first load.
 
 [↑ index](#index)
 
@@ -149,11 +186,20 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `agent` | `model` | `llama3.1:8b` | Ollama model name |
 | `agent` | `max_tokens` | `500` | Maximum response tokens |
 | `agent` | `streaming` | `false` | Stream TTS sentence-by-sentence |
+| `agent` | `prewarm` | `true` | Pre-warm LLM model at startup |
 | `tts` | `model_path` | `models/piper/it_IT-paola-medium.onnx` | Piper voice model |
+| `tts` | `prewarm_cache` | `true` | Pre-synthesize common error phrases at startup |
 | `conversation` | `follow_up_timeout_sec` | `5.0` | Seconds to wait for follow-up (0 = disabled) |
 | `conversation` | `history_timeout_sec` | `300.0` | Clear history after inactivity (0 = never) |
 | `tools` | `knowledge_base_path` | `data/knowledge.json` | Persistent memory storage path |
 | `tools` | `timer_max_sec` | `3600` | Maximum timer duration in seconds |
+| `tools` | `web_search_timeout_sec` | `10.0` | HTTP timeout for web search |
+| `tools` | `web_search_max_results` | `3` | Number of search results to return |
+| `tools` | `web_search_max_content_chars` | `2000` | Max chars from page content extraction |
+| `tools` | `web_search_fetch_page_content` | `false` | Fetch full page content of top result |
+| `health_check` | `enabled` | `false` | Enable HTTP health check endpoint |
+| `health_check` | `host` | `0.0.0.0` | Health check server bind address |
+| `health_check` | `port` | `8080` | Health check server port |
 | `logging` | `level` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
 
 [↑ index](#index)
@@ -202,16 +248,17 @@ IDLE ──▶ │ Wake word  │ ──▶ LISTENING ──▶ │   Your   │
 
 ## Tools
 
-Andromeda comes with the following built-in example tools that the LLM can invoke:
+Andromeda comes with the following built-in tools that the LLM can invoke:
 
 | Tool | Description |
 | :--- | :--- |
 | `get_datetime` | Returns current date and time in Italian |
-| `get_weather` | Fetches current weather via Open-Meteo API |
-| `get_latest_news` | Scrapes latest news from Il Post by category |
+| `get_weather` | Fetches current weather via Open-Meteo API (cached 5 min) |
+| `get_latest_news` | Scrapes latest news from Il Post by category (cached 10 min) |
 | `knowledge_base` | Persistent key-value memory (save, recall, list, delete) |
 | `set_timer` | Countdown timer with audio alarm |
 | `system_control` | macOS volume and brightness control via AppleScript |
+| `web_search` | Web search fallback via DuckDuckGo with offline detection |
 
 ### Fast intents (no LLM)
 

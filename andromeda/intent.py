@@ -25,15 +25,23 @@ async def match_and_execute(text: str) -> str | None:
 
     for intent in _intents:
         for pattern in intent["patterns"]:
-            if pattern.search(text_lower):
-                logger.info("Fast intent matched: %s", pattern.pattern)
-                return await _run_handler(intent["handler"], intent["args"])
+            try:
+                if pattern.search(text_lower):
+                    logger.info("Fast intent matched: %s", pattern.pattern)
+                    return await _run_handler(intent["handler"], intent["args"])
+            except Exception:
+                logger.exception("Fast intent error: %s", pattern.pattern)
+                return None
 
     return None
 
 
 async def _run_handler(handler: callable, args: dict) -> str:
-    if inspect.iscoroutinefunction(handler):
-        return str(await handler(args))
+    try:
+        if inspect.iscoroutinefunction(handler):
+            return str(await handler(args))
+        return str(handler(args))
+    except Exception:
+        logger.exception("Fast intent handler failed")
 
-    return str(handler(args))
+        return "Si è verificato un errore. Riprova."

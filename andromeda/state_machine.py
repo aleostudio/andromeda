@@ -1,11 +1,11 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
-from typing import Any, Callable, Coroutine, TypeAlias
-from enum import Enum, auto
 import asyncio
 import logging
-
+from collections.abc import Callable, Coroutine
+from enum import Enum, auto
+from typing import Any, TypeAlias
 
 logger = logging.getLogger(__name__)
 

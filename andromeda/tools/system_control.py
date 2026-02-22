@@ -23,7 +23,7 @@ _ACTIONS = {
     },
     "volume_get": {
         "script": "output volume of (get volume settings)",
-        "response": None,  # dynamic response from script output
+        "response": None,
     },
     "brightness_up": {
         "script": "tell application \"System Events\" to key code 144",
@@ -34,6 +34,7 @@ _ACTIONS = {
         "response": "Luminosità diminuita.",
     },
 }
+
 
 DEFINITION = {
     "type": "function",
@@ -49,8 +50,7 @@ DEFINITION = {
             "properties": {
                 "action": {
                     "type": "string",
-                    "enum": ["volume_up", "volume_down", "volume_mute", "volume_get",
-                             "brightness_up", "brightness_down"],
+                    "enum": ["volume_up", "volume_down", "volume_mute", "volume_get", "brightness_up", "brightness_down"],
                     "description": (
                         "Azione da eseguire: "
                         "volume_up (alza volume), volume_down (abbassa volume), "

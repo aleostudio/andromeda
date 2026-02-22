@@ -1,12 +1,12 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
-from andromeda.config import AudioConfig, VADConfig
 import logging
-import time
 import threading
+import time
 import numpy as np
 import webrtcvad
+from andromeda.config import AudioConfig, VADConfig
 
 logger = logging.getLogger(__name__)
 
@@ -65,24 +65,23 @@ class VoiceActivityDetector:
 
 
     # Process audio frame for speech detection. Called from audio thread
-    def process_frame(self, frame_bytes: bytes) -> None:
+    def process_frame(self, frame_bytes: bytes, frame_array: np.ndarray) -> None:
         if not self._is_active:
             return
 
         try:
-            is_speech = self._vad.is_speech(
-                frame_bytes,
-                sample_rate=self._audio_cfg.sample_rate,
-            )
+            is_speech = self._vad.is_speech(frame_bytes, sample_rate=self._audio_cfg.sample_rate)
         except Exception:
             return
 
-        # Energy gate: if threshold set, reject speech frames below it
+        # Energy gate: reject speech frames below threshold
         if is_speech and self._energy_threshold > 0.0:
-            audio = np.frombuffer(frame_bytes, dtype=np.int16)
-            rms = float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
-            if rms < self._energy_threshold:
-                is_speech = False  # Below energy threshold — likely background noise
+            try:
+                rms = float(np.sqrt(np.mean(frame_array.astype(np.float32) ** 2)))
+                if rms < self._energy_threshold:
+                    is_speech = False
+            except Exception:
+                pass  # Never crash the audio callback
 
         now = time.monotonic()
 
@@ -135,4 +134,5 @@ class VoiceActivityDetector:
         with self._lock:
             if self._start_time == 0:
                 return 0.0
+
             return time.monotonic() - self._start_time

@@ -1,19 +1,23 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
-from andromeda.config import AudioConfig, TTSConfig
 import asyncio
+import hashlib
 import io
 import logging
 import threading
 import wave
 import numpy as np
 import sounddevice as sd
+from andromeda.config import AudioConfig, TTSConfig
 
 logger = logging.getLogger(__name__)
 
 # Fade duration in samples applied to the end of each sentence to prevent audio pops
 _FADE_SAMPLES = 64
+
+# Max entries in the TTS audio cache
+_TTS_CACHE_MAX = 64
 
 
 # Local text-to-speech using Piper
@@ -28,6 +32,10 @@ class TextToSpeech:
         self._stop_event = threading.Event()
         self._playback_stream: sd.OutputStream | None = None
         self._fallback_proc: asyncio.subprocess.Process | None = None
+
+        # TTS audio cache: maps text hash -> (audio_array, sample_rate)
+        self._cache: dict[str, tuple[np.ndarray, int]] = {}
+        self._cache_order: list[str] = []  # LRU tracking
 
 
     # Load Piper voice model
@@ -44,6 +52,29 @@ class TextToSpeech:
         except Exception:
             logger.exception("Failed to load Piper TTS")
             self._voice = None
+
+
+    # Pre-warm the TTS cache with commonly used phrases
+    def prewarm_cache(self, phrases: list[str] | None = None) -> None:
+        if not self._voice:
+            return
+
+        default_phrases = [
+            "Non ho sentito nulla. Riprova.",
+            "Non ho capito. Puoi ripetere?",
+            "Si è verificato un errore. Riprova.",
+        ]
+        for text in (phrases or default_phrases):
+            key = self._cache_key(text)
+            if key not in self._cache:
+                try:
+                    audio, sr = self._synthesize_piper(text)
+                    self._cache_put(key, audio, sr)
+                    logger.debug("TTS cache pre-warmed: %s", text[:40])
+                except Exception:
+                    logger.warning("Failed to pre-warm TTS cache for: %s", text[:40])
+
+        logger.info("TTS cache pre-warmed with %d phrases", len(self._cache))
 
 
     # Synthesize and play text (interruptible)
@@ -67,6 +98,7 @@ class TextToSpeech:
 
 
     # Consume sentences from a queue and speak them on a single audio stream (streaming mode)
+    # Uses prefetch: synthesizes next sentence while current one is playing
     async def speak_streamed(self, sentence_queue: asyncio.Queue) -> None:
         self._is_speaking = True
         self._stop_event.clear()
@@ -82,56 +114,140 @@ class TextToSpeech:
             self._is_speaking = False
 
 
-    # Streaming Piper: single audio stream, synthesize and play sentence by sentence
+    # Streaming Piper with prefetch: synthesize next sentence while playing current
     async def _speak_streamed_piper(self, sentence_queue: asyncio.Queue) -> None:
         loop = asyncio.get_event_loop()
         stream_opened = False
+        prefetch_task: asyncio.Task | None = None
+        prefetch_result: tuple[np.ndarray, int] | None = None
 
         try:
-            while True:
-                if self._stop_event.is_set():
-                    break
-
-                sentence = await sentence_queue.get()
-
+            while not self._stop_event.is_set():
+                sentence = await self._next_sentence(sentence_queue)
                 if sentence is None:
                     break
 
-                sentence = sentence.strip()
-                if not sentence:
-                    continue
-
                 logger.info("TTS streaming sentence: %s", sentence[:80])
 
-                # Synthesize in executor (blocking)
-                audio, sample_rate = await loop.run_in_executor(None, self._synthesize_piper, sentence)
+                # Use prefetched audio if available, otherwise synthesize now
+                if prefetch_result is not None:
+                    audio, sample_rate = prefetch_result
+                    prefetch_result = None
+                else:
+                    audio, sample_rate = await self._synthesize_cached(loop, sentence)
+
+                # Start prefetching the next sentence immediately
+                prefetch_task = asyncio.create_task(
+                    self._prefetch_next(sentence_queue, loop),
+                )
 
                 # Open stream on first sentence (we now know the sample rate)
                 if not stream_opened:
-                    self._playback_stream = sd.OutputStream(
-                        samplerate=sample_rate,
-                        channels=1,
-                        dtype="float32",
-                    )
-                    self._playback_stream.start()
-                    stream_opened = True
+                    stream_opened = self._open_playback_stream(sample_rate)
+                    if not stream_opened:
+                        break
 
-                # Apply fade-out to prevent pop between sentences
+                # Apply fade-out and write chunks to the shared stream
                 _apply_fade_out(audio)
+                await loop.run_in_executor(None, lambda a=audio, sr=sample_rate: self._write_chunks(a, sr))
 
-                # Write chunks to the shared stream
-                await loop.run_in_executor(
-                    None, lambda a=audio, sr=sample_rate: self._write_chunks(a, sr),
-                )
-
-                if self._stop_event.is_set():
-                    break
+                # Collect prefetched result for next iteration
+                prefetch_result = await self._collect_prefetch(prefetch_task)
+                prefetch_task = None
 
         finally:
-            if stream_opened and self._playback_stream:
+            self._cleanup_stream(prefetch_task, stream_opened)
+
+
+    # Consume next valid sentence from the queue; returns None on stop/end-of-stream
+    async def _next_sentence(self, queue: asyncio.Queue) -> str | None:
+        sentence = await queue.get()
+        if sentence is None:
+            return None
+
+        stripped = sentence.strip()
+
+        return stripped or await self._next_sentence(queue)
+
+
+    # Open the shared playback stream; returns True on success
+    def _open_playback_stream(self, sample_rate: int) -> bool:
+        try:
+            self._playback_stream = sd.OutputStream(
+                samplerate=sample_rate,
+                channels=1,
+                dtype="float32",
+            )
+            self._playback_stream.start()
+            return True
+        except Exception:
+            logger.exception("Failed to open streaming audio output")
+            return False
+
+
+    # Await a prefetch task and return its result (or None on failure)
+    @staticmethod
+    async def _collect_prefetch(task: asyncio.Task | None) -> tuple[np.ndarray, int] | None:
+        if task is None:
+            return None
+        try:
+            return await task
+        except Exception:
+            logger.warning("Prefetch task failed")
+            return None
+
+
+    # Cancel pending prefetch and close the playback stream
+    def _cleanup_stream(self, prefetch_task: asyncio.Task | None, stream_opened: bool) -> None:
+        if prefetch_task is not None:
+            prefetch_task.cancel()
+        if stream_opened and self._playback_stream:
+            try:
                 self._playback_stream.stop()
                 self._playback_stream.close()
-                self._playback_stream = None
+            except Exception:
+                logger.warning("Error closing streaming audio output")
+            self._playback_stream = None
+
+
+    # Prefetch: peek the next sentence from the queue and synthesize it
+    async def _prefetch_next(self, sentence_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> tuple[np.ndarray, int] | None:
+        try:
+            # Non-blocking peek — if queue is empty, just return None
+            sentence = sentence_queue.get_nowait()
+        except asyncio.QueueEmpty:
+            return None
+
+        if sentence is None:
+            # Put the sentinel back so the main loop sees it
+            await sentence_queue.put(None)
+            return None
+
+        sentence = sentence.strip()
+        if not sentence:
+            return None
+
+        # Put the sentence back so the main loop can consume it (but we already have the audio ready)
+        await sentence_queue.put(sentence)
+
+        return await self._synthesize_cached(loop, sentence)
+
+
+    # Synthesize with cache lookup
+    async def _synthesize_cached(self, loop: asyncio.AbstractEventLoop, text: str) -> tuple[np.ndarray, int]:
+        key = self._cache_key(text)
+
+        # Check cache first
+        cached = self._cache.get(key)
+        if cached is not None:
+            logger.debug("TTS cache hit: %s", text[:40])
+            return cached[0].copy(), cached[1]
+
+        # Synthesize and cache
+        audio, sr = await loop.run_in_executor(None, self._synthesize_piper, text)
+        self._cache_put(key, audio, sr)
+
+        return audio, sr
 
 
     # Streaming fallback: macOS 'say' sentence by sentence
@@ -179,25 +295,33 @@ class TextToSpeech:
     # Synthesize with Piper and play through sounddevice (chunk-by-chunk, interruptible)
     async def _speak_piper(self, text: str) -> None:
         loop = asyncio.get_event_loop()
-        audio, sample_rate = await loop.run_in_executor(None, self._synthesize_piper, text)
-
+        audio, sample_rate = await self._synthesize_cached(loop, text)
         _apply_fade_out(audio)
         await loop.run_in_executor(None, lambda: self._play_chunked(audio, sample_rate))
 
 
     # Synthesize text to numpy array (blocking, runs in executor)
     def _synthesize_piper(self, text: str) -> tuple[np.ndarray, int]:
-        wav_buffer = io.BytesIO()
-        with wave.open(wav_buffer, "wb") as wav_file:
-            self._voice.synthesize_wav(text, wav_file)
+        try:
+            wav_buffer = io.BytesIO()
+            with wave.open(wav_buffer, "wb") as wav_file:
+                self._voice.synthesize_wav(text, wav_file)
 
-        wav_buffer.seek(0)
-        with wave.open(wav_buffer, "rb") as wav_file:
-            sample_rate = wav_file.getframerate()
-            audio_bytes = wav_file.readframes(wav_file.getnframes())
+            wav_buffer.seek(0)
+            with wave.open(wav_buffer, "rb") as wav_file:
+                sample_rate = wav_file.getframerate()
+                audio_bytes = wav_file.readframes(wav_file.getnframes())
 
-        audio = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
-        return audio, sample_rate
+            audio = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+
+            return audio, sample_rate
+
+        except Exception:
+            logger.exception("Piper synthesis failed for: %s", text[:40])
+            # Return silence so caller doesn't crash
+            sr = self._audio_cfg.sample_rate
+
+            return np.zeros(sr // 2, dtype=np.float32), sr
 
 
     # Write audio chunks to an already-open playback stream, checking stop_event
@@ -207,32 +331,45 @@ class TextToSpeech:
             if self._stop_event.is_set():
                 logger.debug("TTS chunk playback stopped at %.1fs", i / sample_rate)
                 break
-            chunk = audio[i : i + chunk_size]
-            self._playback_stream.write(chunk.reshape(-1, 1))
+            try:
+                chunk = audio[i : i + chunk_size]
+                self._playback_stream.write(chunk.reshape(-1, 1))
+            except Exception:
+                logger.warning("Audio stream write error at chunk %d", i)
+                break
 
 
     # Play audio chunk-by-chunk with its own stream (used by non-streaming speak)
     def _play_chunked(self, audio: np.ndarray, sample_rate: int) -> None:
-        self._playback_stream = sd.OutputStream(
-            samplerate=sample_rate,
-            channels=1,
-            dtype="float32",
-        )
-        self._playback_stream.start()
+        try:
+            self._playback_stream = sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32")
+            self._playback_stream.start()
+        except Exception:
+            logger.exception("Failed to open audio output stream")
+            self._playback_stream = None
+            return
 
         try:
             self._write_chunks(audio, sample_rate)
         finally:
-            self._playback_stream.stop()
-            self._playback_stream.close()
+            try:
+                self._playback_stream.stop()
+                self._playback_stream.close()
+            except Exception:
+                logger.warning("Error closing audio output stream")
+
             self._playback_stream = None
 
 
     # Fallback to macOS built-in 'say' command (interruptible)
     async def _speak_macos_fallback(self, text: str) -> None:
-        self._fallback_proc = await asyncio.create_subprocess_exec("say", "-v", "Alice", "-r", "180", text)
-        await self._fallback_proc.wait()
-        self._fallback_proc = None
+        try:
+            self._fallback_proc = await asyncio.create_subprocess_exec("say", "-v", "Alice", "-r", "180", text)
+            await self._fallback_proc.wait()
+        except Exception:
+            logger.warning("macOS 'say' fallback failed")
+        finally:
+            self._fallback_proc = None
 
 
     # Check if is currently speaking
@@ -241,9 +378,27 @@ class TextToSpeech:
         return self._is_speaking
 
 
+    # Cache helpers
+    @staticmethod
+    def _cache_key(text: str) -> str:
+        return hashlib.md5(text.strip().lower().encode()).hexdigest()
+
+
+    def _cache_put(self, key: str, audio: np.ndarray, sample_rate: int) -> None:
+        if key in self._cache:
+            return
+
+        if len(self._cache) >= _TTS_CACHE_MAX:
+            oldest = self._cache_order.pop(0)
+            self._cache.pop(oldest, None)
+        self._cache[key] = (audio.copy(), sample_rate)
+        self._cache_order.append(key)
+
+
 # Apply a short linear fade-out at the end of audio to prevent pops
 def _apply_fade_out(audio: np.ndarray) -> None:
     if len(audio) < _FADE_SAMPLES:
         return
+
     fade = np.linspace(1.0, 0.0, _FADE_SAMPLES, dtype=np.float32)
     audio[-_FADE_SAMPLES:] *= fade

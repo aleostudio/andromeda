@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Self
 import yaml
 
+
 @dataclass(frozen=True)
 class AudioConfig:
     sample_rate: int = 16000
@@ -13,9 +14,20 @@ class AudioConfig:
     chunk_ms: int = 30
     dtype: str = "int16"
 
+
+    def __post_init__(self) -> None:
+        if self.sample_rate <= 0:
+            raise ValueError(f"sample_rate must be > 0, got {self.sample_rate}")
+        if self.channels < 1:
+            raise ValueError(f"channels must be >= 1, got {self.channels}")
+        if self.chunk_ms not in (10, 20, 30):
+            raise ValueError(f"chunk_ms must be 10, 20 or 30, got {self.chunk_ms}")
+
+
     @property
     def chunk_samples(self) -> int:
         return int(self.sample_rate * self.chunk_ms / 1000)
+
 
     @property
     def chunk_bytes(self) -> int:
@@ -28,34 +40,58 @@ class WakeWordConfig:
     model_path: str = "models/openwakeword/andromeda.onnx"
     threshold: float = 0.5
 
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.threshold <= 1.0:
+            raise ValueError(f"threshold must be 0.0-1.0, got {self.threshold}")
+
 
 @dataclass(frozen=True)
 class VADConfig:
-    aggressiveness: int = 2
-    silence_timeout_sec: float = 2.0
+    aggressiveness: int = 3
+    silence_timeout_sec: float = 1.5
     speech_pad_ms: int = 300
     max_recording_sec: float = 30.0
     min_recording_sec: float = 0.5
-    energy_threshold_factor: float = 0.3
-    energy_decay_rate: float = 0.95
+    energy_threshold_factor: float = 0.6
+    energy_decay_rate: float = 0.98
+
+    def __post_init__(self) -> None:
+        if self.aggressiveness not in (0, 1, 2, 3):
+            raise ValueError(f"aggressiveness must be 0-3, got {self.aggressiveness}")
+        if self.silence_timeout_sec <= 0:
+            raise ValueError(f"silence_timeout_sec must be > 0, got {self.silence_timeout_sec}")
+        if self.max_recording_sec <= 0:
+            raise ValueError(f"max_recording_sec must be > 0, got {self.max_recording_sec}")
+        if self.energy_threshold_factor < 0:
+            raise ValueError(f"energy_threshold_factor must be >= 0, got {self.energy_threshold_factor}")
+        if not 0.0 < self.energy_decay_rate <= 1.0:
+            raise ValueError(f"energy_decay_rate must be (0, 1], got {self.energy_decay_rate}")
 
 
 @dataclass(frozen=True)
 class NoiseConfig:
-    enabled: bool = True
+    enabled: bool = False
     stationary: bool = True
     prop_decrease: float = 0.75
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.prop_decrease <= 1.0:
+            raise ValueError(f"prop_decrease must be 0.0-1.0, got {self.prop_decrease}")
 
 
 @dataclass(frozen=True)
 class STTConfig:
     engine: str = "faster-whisper"
-    model_size: str = "large-v3"
+    model_size: str = "medium"
     device: str = "auto"
     compute_type: str = "int8"
     language: str = "it"
-    beam_size: int = 5
-    vad_filter: bool = True
+    beam_size: int = 1
+    vad_filter: bool = False
+
+    def __post_init__(self) -> None:
+        if self.beam_size < 1:
+            raise ValueError(f"beam_size must be >= 1, got {self.beam_size}")
 
 
 @dataclass(frozen=True)
@@ -64,8 +100,21 @@ class AgentConfig:
     base_url: str = "http://localhost:11434"
     model: str = "llama3.1:8b"
     max_tokens: int = 500
-    streaming: bool = False  # stream response sentence-by-sentence for lower latency
-    system_prompt: str = "Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. Rispondi in italiano, in modo conciso e naturale. Le tue risposte verranno lette ad alta voce, quindi usa frasi brevi e chiare, evita formattazione markdown, elenchi puntati, simboli speciali, non usare abbreviazioni ambigue e quando dai numeri, scrivi la forma parlata (es. duemila e non 2000)"
+    streaming: bool = True
+    prewarm: bool = True
+    system_prompt: str = (
+        "Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. "
+        "Rispondi in italiano, in modo conciso e naturale. "
+        "Le tue risposte verranno lette ad alta voce, quindi "
+        "usa frasi brevi e chiare, evita formattazione "
+        "markdown, elenchi puntati, simboli speciali, "
+        "non usare abbreviazioni ambigue e quando dai numeri, "
+        "scrivi la forma parlata (es. duemila e non 2000)"
+    )
+
+    def __post_init__(self) -> None:
+        if self.max_tokens < 1:
+            raise ValueError(f"max_tokens must be >= 1, got {self.max_tokens}")
 
 
 @dataclass(frozen=True)
@@ -75,7 +124,8 @@ class TTSConfig:
     model_config: str = "models/piper/it_IT-paola-medium.onnx.json"
     speaker_id: int = 0
     length_scale: float = 1.0
-    sentence_silence: float = 0.3
+    sentence_silence: float = 0.5
+    prewarm_cache: bool = True
 
 
 @dataclass(frozen=True)
@@ -87,8 +137,8 @@ class FeedbackConfig:
 
 @dataclass(frozen=True)
 class ConversationConfig:
-    follow_up_timeout_sec: float = 5.0  # seconds to wait for follow-up after TTS ends
-    history_timeout_sec: float = 300.0  # clear conversation history after N seconds of inactivity (0 = never)
+    follow_up_timeout_sec: float = 5.0
+    history_timeout_sec: float = 300.0
 
 
 @dataclass(frozen=True)
@@ -96,12 +146,31 @@ class ToolsConfig:
     knowledge_base_path: str = "data/knowledge.json"
     weather_timeout_sec: float = 10.0
     timer_max_sec: int = 3600
+    web_search_timeout_sec: float = 10.0
+    web_search_max_results: int = 3
+    web_search_max_content_chars: int = 2000
+    web_search_fetch_page_content: bool = False
 
+
+@dataclass(frozen=True)
+class HealthCheckConfig:
+    enabled: bool = False
+    host: str = "0.0.0.0"
+    port: int = 8080
+
+    def __post_init__(self) -> None:
+        if not 1 <= self.port <= 65535:
+            raise ValueError(f"port must be 1-65535, got {self.port}")
 
 
 @dataclass(frozen=True)
 class LoggingConfig:
     level: str = "INFO"
+
+    def __post_init__(self) -> None:
+        valid = ("DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL")
+        if self.level.upper() not in valid:
+            raise ValueError(f"level must be one of {valid}, got '{self.level}'")
 
 
 @dataclass(frozen=True)
@@ -116,6 +185,7 @@ class AppConfig:
     conversation: ConversationConfig = field(default_factory=ConversationConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
+    health_check: HealthCheckConfig = field(default_factory=HealthCheckConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
 
 
@@ -140,5 +210,6 @@ class AppConfig:
             conversation=ConversationConfig(**raw.get("conversation", {})),
             tools=ToolsConfig(**raw.get("tools", {})),
             feedback=FeedbackConfig(**raw.get("feedback", {})),
+            health_check=HealthCheckConfig(**raw.get("health_check", {})),
             logging=LoggingConfig(**raw.get("logging", {})),
         )

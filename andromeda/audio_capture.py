@@ -1,21 +1,27 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
-from enum import Enum, auto
-from typing import Callable
-from andromeda.config import AudioConfig, NoiseConfig
 import collections
 import logging
 import threading
 import numpy as np
 import sounddevice as sd
+from collections.abc import Callable
+from enum import Enum, auto
+from andromeda.config import AudioConfig, NoiseConfig
 
 logger = logging.getLogger(__name__)
 
+# Minimum SNR (in dB) below which noise reduction is applied
+_NOISE_SNR_THRESHOLD_DB = 15.0
+
+# Type alias for audio frame callbacks: (raw_bytes, numpy_int16_array)
+AudioFrameCallback = Callable[[bytes, np.ndarray], None]
+
 
 class AudioRouteMode(Enum):
-    NORMAL = auto()     # frames go to all listeners (wake word + VAD)
-    MUTED = auto()      # frames dropped entirely
+    NORMAL = auto() # frames go to all listeners (wake word + VAD)
+    MUTED = auto()  # frames dropped entirely
 
 
 # Continuous audio capture from microphone with ring buffer
@@ -34,15 +40,15 @@ class AudioCapture:
         self._recording_buffer: list[bytes] = []
         self._is_recording = False
 
-        # Callbacks
-        self._on_audio_frame: list[Callable[[bytes], None]] = []
+        # Callbacks receive (frame_bytes, frame_numpy_int16)
+        self._on_audio_frame: list[AudioFrameCallback] = []
 
         self._lock = threading.Lock()
         self._route_mode = AudioRouteMode.NORMAL
 
 
-    # Register callback for each audio frame (for wake word / VAD)
-    def on_audio_frame(self, callback: Callable[[bytes], None]) -> None:
+    # Register callback for each audio frame
+    def on_audio_frame(self, callback: AudioFrameCallback) -> None:
         self._on_audio_frame.append(callback)
 
 
@@ -95,11 +101,11 @@ class AudioCapture:
             audio_bytes = b"".join(self._recording_buffer)
             self._recording_buffer.clear()
 
-        audio = np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0
+        audio = (np.frombuffer(audio_bytes, dtype=np.int16).astype(np.float32) / 32768.0)
         logger.debug("Recording stopped: %.2f sec", len(audio) / self._cfg.sample_rate)
 
         if self._noise_cfg.enabled:
-            audio = self._reduce_noise(audio)
+            audio = self._reduce_noise_adaptive(audio)
 
         return audio
 
@@ -145,25 +151,41 @@ class AudioCapture:
         if self._route_mode == AudioRouteMode.MUTED:
             return
 
+        # Convert once, pass both formats to callbacks
         frame_bytes = indata.tobytes()
+        frame_array = indata[:, 0] if indata.ndim > 1 else indata
+        frame_int16 = frame_array.view(np.int16)
 
         with self._lock:
             self._ring_buffer.append(frame_bytes)
             if self._is_recording:
                 self._recording_buffer.append(frame_bytes)
 
-        # Dispatch to all listeners (wake word detector, VAD)
+        # Dispatch both bytes and numpy to all listeners
         for cb in self._on_audio_frame:
             try:
-                cb(frame_bytes)
+                cb(frame_bytes, frame_int16)
             except Exception:
                 logger.exception("Audio frame callback error")
 
 
-    # Apply noise reduction to recorded audio
-    def _reduce_noise(self, audio: np.ndarray) -> np.ndarray:
+    # Adaptive noise reduction: only apply when SNR is low
+    def _reduce_noise_adaptive(self, audio: np.ndarray) -> np.ndarray:
         try:
-            import noisereduce as nr
+            snr_db = self._estimate_snr(audio)
+            logger.debug("Audio SNR estimate: %.1f dB", snr_db)
+
+            if snr_db >= _NOISE_SNR_THRESHOLD_DB:
+                logger.debug("SNR is good (%.1f dB >= %.1f dB), skipping noise reduction", snr_db, _NOISE_SNR_THRESHOLD_DB)
+                return audio
+
+            logger.info("Low SNR (%.1f dB), applying noise reduction", snr_db)
+
+            try:
+                import noisereduce as nr
+            except ImportError:
+                logger.warning("noisereduce package not installed. Install it with: pip install noisereduce")
+                return audio
 
             return nr.reduce_noise(
                 y=audio,
@@ -175,3 +197,36 @@ class AudioCapture:
         except Exception:
             logger.warning("Noise reduction failed, using raw audio")
             return audio
+
+
+    # Estimate Signal-to-Noise Ratio in dB
+    @staticmethod
+    def _estimate_snr(audio: np.ndarray) -> float:
+        if len(audio) == 0:
+            return 0.0
+
+        frame_size = 1600  # 100ms at 16kHz
+        num_frames = len(audio) // frame_size
+        if num_frames < 3:
+            return 20.0  # Too short, assume decent SNR
+
+        energies = []
+        for i in range(num_frames):
+            frame = audio[i * frame_size:(i + 1) * frame_size]
+            rms = float(np.sqrt(np.mean(frame ** 2)))
+            energies.append(rms)
+
+        energies.sort()
+
+        # Bottom 20% = noise, top 20% = signal
+        n_noise = max(1, num_frames // 5)
+        n_signal = max(1, num_frames // 5)
+        noise_rms = np.mean(energies[:n_noise])
+        signal_rms = np.mean(energies[-n_signal:])
+
+        if noise_rms < 1e-10:
+            return 60.0  # Effectively no noise
+
+        snr_db = 20 * np.log10(signal_rms / noise_rms)
+
+        return float(snr_db)

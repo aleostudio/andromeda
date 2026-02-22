@@ -41,8 +41,9 @@ agent:
   model: "gpt-oss:20b"
   max_tokens: 500
   streaming: true               # true = speak sentence-by-sentence as LLM generates (lower latency)
+  prewarm: true                 # pre-warm model at startup to avoid cold start on first request
   system_prompt: |
-    Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. 
+    Sei un assistente vocale domestico intelligente. Ti chiami Andromeda.
     Rispondi in italiano, in modo conciso e naturale.
     Le tue risposte verranno lette ad alta voce, quindi:
     - Usa frasi brevi e chiare
@@ -58,6 +59,7 @@ tts:
   speaker_id: 0
   length_scale: 1.0             # speech speed (lower = faster)
   sentence_silence: 0.5         # pause between sentences in seconds
+  prewarm_cache: true           # pre-synthesize common error phrases at startup
 
 conversation:
   follow_up_timeout_sec: 5.0    # seconds to wait for follow-up after response (0 = disabled)
@@ -67,12 +69,20 @@ tools:
   knowledge_base_path: "data/knowledge.json"
   weather_timeout_sec: 10.0
   timer_max_sec: 3600
-
+  web_search_timeout_sec: 10.0        # timeout HTTP per la ricerca web
+  web_search_max_results: 3           # numero di risultati da restituire
+  web_search_max_content_chars: 2000  # max caratteri dal contenuto della pagina
+  web_search_fetch_page_content: false # scarica il contenuto completo del primo risultato
 
 feedback:
   wake_sound: "sounds/wake.wav"
   done_sound: "sounds/done.wav"
   error_sound: "sounds/error.wav"
+
+health_check:
+  enabled: false                # enable HTTP health check endpoint
+  host: "0.0.0.0"
+  port: 8080                    # GET http://localhost:8080/ for status JSON
 
 logging:
   level: "INFO" # DEBUG, INFO, WARNING, ERROR

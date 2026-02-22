@@ -76,7 +76,7 @@ class TestAudioCallback:
     def test_normal_mode_dispatches(self):
         cap = AudioCapture(AudioConfig(), NoiseConfig(enabled=False))
         received = []
-        cap.on_audio_frame(lambda frame: received.append(frame))
+        cap.on_audio_frame(lambda fb, fa: received.append(fb))
 
         # Simulate callback
         indata = np.zeros((480, 1), dtype=np.int16)
@@ -87,7 +87,7 @@ class TestAudioCallback:
     def test_muted_drops_frames(self):
         cap = AudioCapture(AudioConfig(), NoiseConfig(enabled=False))
         received = []
-        cap.on_audio_frame(lambda frame: received.append(frame))
+        cap.on_audio_frame(lambda fb, fa: received.append(fb))
         cap.mute()
 
         indata = np.zeros((480, 1), dtype=np.int16)
@@ -113,7 +113,7 @@ class TestAudioCallback:
 
     def test_callback_error_handled(self):
         cap = AudioCapture(AudioConfig(), NoiseConfig(enabled=False))
-        cap.on_audio_frame(lambda frame: 1 / 0)  # Will raise
+        cap.on_audio_frame(lambda fb, fa: 1 / 0)  # Will raise
 
         indata = np.zeros((480, 1), dtype=np.int16)
         # Should not raise

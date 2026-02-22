@@ -1,11 +1,11 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
-from pathlib import Path
-from andromeda.config import AudioConfig, FeedbackConfig
 import logging
 import numpy as np
 import sounddevice as sd
+from pathlib import Path
+from andromeda.config import AudioConfig, FeedbackConfig
 
 logger = logging.getLogger(__name__)
 

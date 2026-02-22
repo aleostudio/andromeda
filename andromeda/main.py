@@ -14,10 +14,13 @@ from andromeda.agent import AIAgent
 from andromeda.audio_capture import AudioCapture
 from andromeda.config import AppConfig
 from andromeda.feedback import AudioFeedback
+from andromeda.health import HealthCheckServer
+from andromeda.intent import match_and_execute
+from andromeda.metrics import PerformanceMetrics
 from andromeda.state_machine import AssistantState, StateMachine
 from andromeda.stt import SpeechRecognizer
-from andromeda.intent import match_and_execute
 from andromeda.tools import register_all_tools
+from andromeda.tools.http_client import close_client
 from andromeda.tts import TextToSpeech
 from andromeda.vad import VoiceActivityDetector
 from andromeda.wake_word import WakeWordDetector
@@ -39,6 +42,8 @@ class VoiceAssistant:
         self._agent = AIAgent(config.agent, config.conversation)
         self._tts = TextToSpeech(config.audio, config.tts)
         self._feedback = AudioFeedback(config.audio, config.feedback)
+        self._metrics = PerformanceMetrics()
+        self._health = HealthCheckServer(config.health_check)
 
         # State machine
         self._sm = StateMachine()
@@ -71,31 +76,92 @@ class VoiceAssistant:
         logger.info("")
         logger.info("Initializing home assistant...")
 
-        self._feedback.initialize()
-        self._wake_word.initialize()
-        self._stt.initialize()
-        self._agent.initialize()
-        self._tts.initialize()
+        # Raise every blocker exception
+        try:
+            self._feedback.initialize()
+        except Exception:
+            logger.exception("Failed to initialize audio feedback")
+
+        try:
+            self._wake_word.initialize()
+        except Exception:
+            logger.exception("Failed to initialize wake word detector")
+            raise
+
+        try:
+            self._stt.initialize()
+        except Exception:
+            logger.exception("Failed to initialize STT engine")
+            raise
+
+        try:
+            self._agent.initialize()
+        except Exception:
+            logger.exception("Failed to initialize AI agent")
+            raise
+
+        try:
+            self._tts.initialize()
+        except Exception:
+            logger.exception("Failed to initialize TTS engine")
+
+        if self._cfg.tts.prewarm_cache:
+            try:
+                self._tts.prewarm_cache()
+            except Exception:
+                logger.warning("Failed to pre-warm TTS cache")
 
         # Register tools
-        register_all_tools(self._agent, self._cfg.tools, self._feedback)
+        try:
+            register_all_tools(self._agent, self._cfg.tools, self._feedback)
+        except Exception:
+            logger.exception("Failed to register tools")
 
         # Wire audio callbacks
         self._audio.on_audio_frame(self._wake_word.process_frame)
         self._audio.on_audio_frame(self._vad.process_frame)
+
+        # Wire health check providers
+        self._health.set_state_provider(lambda: self._sm.state)
+        self._health.set_metrics_provider(self._metrics.get_summary)
 
         logger.info("All components initialized")
 
 
     # Run the assistant main loop
     async def run(self) -> None:
-        self._audio.start()
+        try:
+            await self._health.start()
+        except Exception:
+            logger.warning("Failed to start health check server")
+
+        # Pre-warm Ollama model (load into GPU/RAM)
+        if self._cfg.agent.prewarm:
+            await self._agent.prewarm_model()
+
+        try:
+            self._audio.start()
+        except Exception:
+            logger.exception("Failed to start audio capture")
+            raise
+
         logger.info("Voice assistant is running. Listening for wake word...")
 
         try:
             await self._sm.run()
         finally:
-            self._audio.stop()
+            try:
+                self._audio.stop()
+            except Exception:
+                logger.warning("Error stopping audio capture")
+            try:
+                await self._health.stop()
+            except Exception:
+                logger.warning("Error stopping health check")
+            try:
+                self._metrics.log_summary()
+            except Exception:
+                logger.warning("Error logging metrics summary")
 
 
     # IDLE: Listen for wake word in background
@@ -106,25 +172,19 @@ class VoiceAssistant:
 
         # Wait for wake word detection (runs in thread via event)
         loop = asyncio.get_event_loop()
-        detected = await loop.run_in_executor(
-            None,
-            lambda: self._wake_word.wait_for_detection(timeout=None),
-        )
+        detected = await loop.run_in_executor(None, lambda: self._wake_word.wait_for_detection(timeout=None))
 
         if detected:
+            self._metrics.start_pipeline()
+
             # Calibrate speech energy from the ring buffer audio
             calibration_vad = webrtcvad.Vad(self._cfg.vad.aggressiveness)
-            self._speech_energy = self._audio.calibrate_speech_energy(
-                calibration_vad, self._cfg.audio.sample_rate
-            )
+            self._speech_energy = self._audio.calibrate_speech_energy(calibration_vad, self._cfg.audio.sample_rate)
             energy_threshold = self._speech_energy * self._cfg.vad.energy_threshold_factor
             self._vad.set_energy_threshold(energy_threshold)
-            logger.info(
-                "Calibrated speech energy: %.1f, VAD energy threshold: %.1f",
-                self._speech_energy, energy_threshold,
-            )
-
+            logger.info("Calibrated speech energy: %.1f, VAD energy threshold: %.1f", self._speech_energy, energy_threshold)
             self._feedback.play("wake")
+
             return AssistantState.LISTENING
 
         return AssistantState.IDLE
@@ -153,9 +213,11 @@ class VoiceAssistant:
         if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
             logger.info("Recording too short or no speech detected, back to IDLE")
             await self._speak_error("Non ho sentito nulla. Riprova.")
+
             return AssistantState.IDLE
 
         self._feedback.play("done")
+
         return AssistantState.PROCESSING
 
 
@@ -189,6 +251,7 @@ class VoiceAssistant:
             return AssistantState.IDLE
 
         logger.info("Follow-up speech detected")
+        self._metrics.start_pipeline()
         self._feedback.play("done")
 
         return AssistantState.PROCESSING
@@ -197,7 +260,8 @@ class VoiceAssistant:
     # PROCESSING: STT transcription + AI response + TTS
     async def _handle_processing(self, _state: AssistantState) -> AssistantState:
         # Transcribe
-        text = await self._stt.transcribe(self._recorded_audio)
+        with self._metrics.measure("stt"):
+            text = await self._stt.transcribe(self._recorded_audio)
 
         if not text.strip():
             logger.info("Empty transcription, back to IDLE")
@@ -208,34 +272,43 @@ class VoiceAssistant:
         logger.info("User said: %s", text)
 
         # Try fast intent match first (no LLM needed)
-        fast_response = await match_and_execute(text)
+        with self._metrics.measure("intent_match"):
+            fast_response = await match_and_execute(text)
+
         if fast_response:
             logger.info("Fast intent response: %s", fast_response[:80])
             self._response_text = fast_response
             self._audio.mute()
             try:
-                await self._tts.speak(fast_response)
+                with self._metrics.measure("tts"):
+                    await self._tts.speak(fast_response)
             finally:
                 self._audio.unmute()
+            self._metrics.end_pipeline()
+
             return AssistantState.SPEAKING
 
         # No fast match — use LLM
         self._audio.mute()
         try:
             if self._cfg.agent.streaming:
-                await self._process_streaming(text)
+                with self._metrics.measure("llm_streaming"):
+                    await self._process_streaming(text)
             else:
-                await self._process_standard(text)
+                with self._metrics.measure("llm"):
+                    await self._process_standard(text)
         finally:
             self._audio.unmute()
 
+        self._metrics.end_pipeline()
         return AssistantState.SPEAKING
 
 
     # Standard mode: wait for full response, then speak
     async def _process_standard(self, text: str) -> None:
         self._response_text = await self._agent.process(text)
-        await self._tts.speak(self._response_text)
+        with self._metrics.measure("tts"):
+            await self._tts.speak(self._response_text)
 
 
     # Streaming mode: speak sentence-by-sentence as LLM generates
@@ -243,7 +316,6 @@ class VoiceAssistant:
         sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
         agent_task = asyncio.create_task(self._agent.process_streaming(text, sentence_queue))
         tts_task = asyncio.create_task(self._tts.speak_streamed(sentence_queue))
-
         self._response_text = await agent_task
         await tts_task
 
@@ -263,24 +335,50 @@ class VoiceAssistant:
 
     # ERROR: Speak error message and return to IDLE
     async def _handle_error(self, _state: AssistantState) -> AssistantState:
-        await self._speak_error("Si è verificato un errore. Riprova.")
+        try:
+            await self._speak_error("Ho riscontrato un errore. Ripeti la domanda.")
+        except Exception:
+            logger.exception("Failed to speak error message")
+
         return AssistantState.IDLE
 
 
     # Speak a short error message to the user
     async def _speak_error(self, message: str) -> None:
         logger.warning("Spoken error: %s", message)
-        self._audio.mute()
+        try:
+            self._audio.mute()
+        except Exception:
+            logger.warning("Failed to mute audio for error message")
         try:
             await self._tts.speak(message)
+        except Exception:
+            logger.exception("TTS failed to speak error: %s", message)
         finally:
-            self._audio.unmute()
+            try:
+                self._audio.unmute()
+            except Exception:
+                logger.warning("Failed to unmute audio after error")
 
 
     # Release all resources. Unblocks threads waiting on events
     async def shutdown(self) -> None:
-        self._wake_word.shutdown()
-        await self._agent.close()
+        try:
+            self._wake_word.shutdown()
+        except Exception:
+            logger.warning("Error shutting down wake word detector")
+        try:
+            await self._agent.close()
+        except Exception:
+            logger.warning("Error closing AI agent")
+        try:
+            await self._health.stop()
+        except Exception:
+            logger.warning("Error stopping health check server")
+        try:
+            await close_client()
+        except Exception:
+            logger.warning("Error closing shared HTTP client")
 
 
 # Logging setup
@@ -288,9 +386,7 @@ def setup_logging(config: AppConfig) -> None:
     logging.basicConfig(
         level=getattr(logging, config.logging.level),
         format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
-        handlers=[
-            logging.StreamHandler(sys.stdout),
-        ],
+        handlers=[logging.StreamHandler(sys.stdout)],
     )
 
 
@@ -310,9 +406,12 @@ def main() -> None:
     loop = asyncio.new_event_loop()
 
     def shutdown_handler() -> None:
-        logger.info("Shutting down...")
-        for task in asyncio.all_tasks(loop):
-            task.cancel()
+        try:
+            logger.info("Shutting down...")
+            for task in asyncio.all_tasks(loop):
+                task.cancel()
+        except Exception:
+            pass  # Best-effort during shutdown
 
     loop.add_signal_handler(signal.SIGINT, shutdown_handler)
     loop.add_signal_handler(signal.SIGTERM, shutdown_handler)

@@ -64,7 +64,8 @@ class TestProcessFrame:
         vad = VoiceActivityDetector(AudioConfig(), VADConfig())
         # Not started, should do nothing
         frame = _make_frame(0, 480)
-        vad.process_frame(frame)
+        frame_array = np.frombuffer(frame, dtype=np.int16)
+        vad.process_frame(frame, frame_array)
         assert vad.had_speech is False
 
     def test_max_recording_timeout(self):
@@ -74,7 +75,8 @@ class TestProcessFrame:
         # Wait a tiny bit to exceed max
         time.sleep(0.02)
         frame = _make_frame(0, 480)
-        vad.process_frame(frame)
+        frame_array = np.frombuffer(frame, dtype=np.int16)
+        vad.process_frame(frame, frame_array)
         assert vad._speech_ended.is_set()
 
 

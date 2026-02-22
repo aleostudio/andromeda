@@ -1,11 +1,11 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
-from pathlib import Path
-from andromeda.config import AudioConfig, WakeWordConfig
 import logging
 import threading
 import numpy as np
+from pathlib import Path
+from andromeda.config import AudioConfig, WakeWordConfig
 
 logger = logging.getLogger(__name__)
 
@@ -48,25 +48,28 @@ class WakeWordDetector:
 
 
     # Process a single audio frame. Called from audio callback thread
-    def process_frame(self, frame_bytes: bytes) -> None:
+    def process_frame(self, _frame_bytes: bytes, frame_array: np.ndarray) -> None:
         if self._model is None:
             return
 
-        audio = np.frombuffer(frame_bytes, dtype=np.int16)
+        try:
+            with self._lock:
+                prediction = self._model.predict(frame_array)
 
-        with self._lock:
-            prediction = self._model.predict(audio)
+            # Check all model predictions against threshold
+            for model_name, score in prediction.items():
+                if score > self._wake_cfg.threshold:
+                    logger.info("Wake word detected: %s (score=%.3f)", model_name, score)
+                    self._detected.set()
 
-        # Check all model predictions against threshold
-        for model_name, score in prediction.items():
-            if score > self._wake_cfg.threshold:
-                logger.info("Wake word detected: %s (score=%.3f)", model_name, score)
-                self._detected.set()
-                # Reset model state to avoid repeated triggers
-                with self._lock:
-                    self._model.reset()
+                    # Reset model state to avoid repeated triggers
+                    with self._lock:
+                        self._model.reset()
 
-                return
+                    return
+        except Exception:
+            # Never crash the audio callback thread
+            pass
 
 
     # Block until wake word is detected. Returns True if detected, False on shutdown/timeout
@@ -74,8 +77,10 @@ class WakeWordDetector:
         self._detected.wait(timeout=timeout)
         if self._shutdown:
             return False
+
         detected = self._detected.is_set()
         self._detected.clear()
+
         return detected
 
 
