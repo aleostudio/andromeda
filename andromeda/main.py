@@ -127,6 +127,9 @@ class VoiceAssistant:
         self._audio.on_audio_frame(self._wake_word.process_frame)
         self._audio.on_audio_frame(self._vad.process_frame)
 
+        # Fade out thinking tone when TTS starts playing
+        self._tts.set_on_first_audio(self._feedback.stop)
+
         # Wire health check providers
         self._health.set_state_provider(lambda: self._sm.state)
         self._health.set_metrics_provider(self._metrics.get_summary)
@@ -297,6 +300,7 @@ class VoiceAssistant:
 
         # No fast match — use LLM
         self._tts_interrupted = False
+        self._feedback.play("thinking")
         try:
             if self._cfg.agent.streaming:
                 with self._metrics.measure("llm_streaming"):
@@ -305,6 +309,7 @@ class VoiceAssistant:
                 with self._metrics.measure("llm"):
                     await self._process_standard(text)
         finally:
+            self._feedback.stop()
             self._audio.unmute()
 
         self._metrics.end_pipeline()

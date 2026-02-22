@@ -9,6 +9,7 @@ import threading
 import wave
 import numpy as np
 import sounddevice as sd
+from collections.abc import Callable
 from andromeda.config import AudioConfig, TTSConfig
 
 logger = logging.getLogger("[ TTS ]")
@@ -32,12 +33,18 @@ class TextToSpeech:
         self._stop_event = threading.Event()
         self._playback_stream: sd.OutputStream | None = None
         self._fallback_proc: asyncio.subprocess.Process | None = None
-
-        self._syn_config = None  # Piper SynthesisConfig, built on initialize()
+        self._syn_config = None
+        self._on_first_audio: Callable[[], None] | None = None
 
         # TTS audio cache: maps normalized text -> (audio_array, sample_rate)
         self._cache: dict[str, tuple[np.ndarray, int]] = {}
         self._cache_order: collections.deque[str] = collections.deque()  # LRU tracking
+
+
+    # Set a callback invoked right before TTS opens its audio stream
+    # Used to fade out the thinking tone smoothly
+    def set_on_first_audio(self, callback: Callable[[], None]) -> None:
+        self._on_first_audio = callback
 
 
     # Load Piper voice model
@@ -193,6 +200,9 @@ class TextToSpeech:
     # Open the shared playback stream; returns True on success
     def _open_playback_stream(self, sample_rate: int) -> bool:
         try:
+            # Signal thinking tone to fade out before TTS takes over
+            if self._on_first_audio:
+                self._on_first_audio()
             self._playback_stream = sd.OutputStream(
                 samplerate=sample_rate,
                 channels=1,
@@ -362,6 +372,9 @@ class TextToSpeech:
     # Play audio chunk-by-chunk with its own stream (used by non-streaming speak)
     def _play_chunked(self, audio: np.ndarray, sample_rate: int) -> None:
         try:
+            # Signal thinking tone to fade out before TTS takes over
+            if self._on_first_audio:
+                self._on_first_audio()
             self._playback_stream = sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32")
             self._playback_stream.start()
         except Exception:

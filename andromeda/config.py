@@ -136,6 +136,12 @@ class FeedbackConfig:
     wake_sound: str = "sounds/wake.wav"
     done_sound: str = "sounds/done.wav"
     error_sound: str = "sounds/error.wav"
+    thinking_sound: str = "sounds/thinking.wav"
+    thinking_volume: float = 0.5
+
+    def __post_init__(self) -> None:
+        if not 0.0 <= self.thinking_volume <= 1.0:
+            raise ValueError(f"thinking_volume must be 0.0-1.0, got {self.thinking_volume}")
 
 
 @dataclass(frozen=True)
