@@ -126,22 +126,21 @@ class TextToSpeech:
         loop = asyncio.get_event_loop()
         stream_opened = False
         prefetch_task: asyncio.Task | None = None
-        prefetch_result: tuple[np.ndarray, int] | None = None
+        prefetch_result: tuple[str, np.ndarray, int] | None = None
 
         try:
             while not self._stop_event.is_set():
-                sentence = await self._next_sentence(sentence_queue)
-                if sentence is None:
-                    break
-
-                logger.info("TTS streaming sentence: %s", sentence[:80])
-
-                # Use prefetched audio if available, otherwise synthesize now
+                # If we have a prefetched sentence, use it directly instead of reading from queue
                 if prefetch_result is not None:
-                    audio, sample_rate = prefetch_result
+                    sentence, audio, sample_rate = prefetch_result
                     prefetch_result = None
                 else:
+                    sentence = await self._next_sentence(sentence_queue)
+                    if sentence is None:
+                        break
                     audio, sample_rate = await self._synthesize_cached(loop, sentence)
+
+                logger.info("TTS streaming sentence: %s", " ".join(sentence[:200].split()))
 
                 # Start prefetching the next sentence immediately
                 prefetch_task = asyncio.create_task(
@@ -194,7 +193,7 @@ class TextToSpeech:
 
     # Await a prefetch task and return its result (or None on failure)
     @staticmethod
-    async def _collect_prefetch(task: asyncio.Task | None) -> tuple[np.ndarray, int] | None:
+    async def _collect_prefetch(task: asyncio.Task | None) -> tuple[str, np.ndarray, int] | None:
         if task is None:
             return None
         try:
@@ -217,10 +216,11 @@ class TextToSpeech:
             self._playback_stream = None
 
 
-    # Prefetch: peek the next sentence from the queue and synthesize it
-    async def _prefetch_next(self, sentence_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> tuple[np.ndarray, int] | None:
+    # Prefetch: consume the next sentence from the queue and synthesize it ahead of time
+    # Returns (sentence, audio, sample_rate) so the main loop can use both directly
+    async def _prefetch_next(self, sentence_queue: asyncio.Queue, loop: asyncio.AbstractEventLoop) -> tuple[str, np.ndarray, int] | None:
         try:
-            # Non-blocking peek — if queue is empty, just return None
+            # Non-blocking — if queue is empty, just return None
             sentence = sentence_queue.get_nowait()
         except asyncio.QueueEmpty:
             return None
@@ -234,10 +234,8 @@ class TextToSpeech:
         if not sentence:
             return None
 
-        # Put the sentence back so the main loop can consume it (but we already have the audio ready)
-        await sentence_queue.put(sentence)
-
-        return await self._synthesize_cached(loop, sentence)
+        audio, sr = await self._synthesize_cached(loop, sentence)
+        return sentence, audio, sr
 
 
     # Synthesize with cache lookup
@@ -272,7 +270,7 @@ class TextToSpeech:
             if not sentence:
                 continue
 
-            logger.info("TTS streaming sentence: %s", sentence[:80])
+            logger.info("TTS streaming sentence: %s", " ".join(sentence[:200].split()))
             await self._speak_macos_fallback(sentence)
 
             if self._stop_event.is_set():

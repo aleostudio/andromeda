@@ -13,11 +13,18 @@ from andromeda.config import AgentConfig, ConversationConfig
 logger = logging.getLogger(__name__)
 
 # Regex to split on sentence endings AND mid-sentence pauses (commas, semicolons, colons)
-_SENTENCE_RE = re.compile(r'(?<=[.!?])\s+')
-_CLAUSE_RE = re.compile(r'(?<=[.!?;:,])\s+')
+# Uses (?<=\D\.) to avoid splitting on numbered list items like "2. Taglia..."
+_SENTENCE_RE = re.compile(r'(?<=\D\.)\s+|(?<=[!?])\s+')
+_CLAUSE_RE = re.compile(r'(?<=\D\.)\s+|(?<=[!?;:,])\s+')
 
 # Minimum clause length to push to TTS (avoid very short fragments)
 _MIN_CLAUSE_LEN = 20
+
+# Strip markdown: inline formatting (bold/italic/code/strikethrough)
+_MARKDOWN_INLINE_RE = re.compile(r'[*_`~]+')
+
+# Strip markdown: headers and list prefixes (line-start patterns)
+_MARKDOWN_BLOCK_RE = re.compile(r'^\s*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+)', re.MULTILINE)
 
 # Constants to avoid repeats
 _MODEL_CHAT_PATH = "/api/chat"
@@ -158,7 +165,7 @@ class AIAgent:
         try:
             response_text = await self._complete_with_tools()
             self._conversation.append({"role": "assistant", "content": response_text})
-            logger.info("Agent response: %s", response_text[:100])
+            logger.info("Agent response: %s", " ".join(response_text[:200].split()))
             return response_text
 
         except httpx.ConnectError:
@@ -192,7 +199,7 @@ class AIAgent:
             # First, handle tool calls (non-streaming, tools need full response)
             full_text = await self._complete_with_tools_streaming(sentence_queue)
             self._conversation.append({"role": "assistant", "content": full_text})
-            logger.info("Agent response (streamed): %s", full_text[:100])
+            logger.info("Agent response (streamed): %s", " ".join(full_text[:200].split()))
             return full_text
 
         except httpx.ConnectError:
@@ -223,6 +230,7 @@ class AIAgent:
         ]
 
         # Tool calling loop (non-streaming — tools need the full response to parse)
+        used_tools = False
         for _ in range(5):
             message = await self._chat_request(messages)
             tool_calls = message.get("tool_calls", [])
@@ -230,13 +238,32 @@ class AIAgent:
             if not tool_calls:
                 break
 
+            used_tools = True
             messages.append(message)
             for tool_call in tool_calls:
                 result = await self._execute_tool_call(tool_call)
                 messages.append({"role": "tool", "content": result})
 
-        # Now stream the final text response sentence by sentence
-        return await self._stream_response(messages, sentence_queue)
+        if used_tools:
+            # Tools were called — stream a fresh response that incorporates tool results
+            return await self._stream_response(messages, sentence_queue)
+
+        # No tools — use the text we already received (avoids a duplicate HTTP call)
+        text = message.get("content", "").strip()
+        await self._enqueue_text(text, sentence_queue)
+        return text
+
+
+    # Split already-complete text into sentences and push to queue (no HTTP call)
+    @staticmethod
+    async def _enqueue_text(text: str, queue: asyncio.Queue) -> None:
+        if not text:
+            return
+        sentences = _SENTENCE_RE.split(text)
+        for sentence in sentences:
+            stripped = AIAgent._strip_markdown(sentence)
+            if stripped:
+                await queue.put(stripped)
 
 
     # Stream response from Ollama, splitting into clauses and pushing to queue
@@ -309,11 +336,18 @@ class AIAgent:
         return await AIAgent._try_clause_split(buffer, queue)
 
 
+    # Strip markdown formatting from text for clean TTS output
+    @staticmethod
+    def _strip_markdown(text: str) -> str:
+        text = _MARKDOWN_BLOCK_RE.sub('', text)
+        return _MARKDOWN_INLINE_RE.sub('', text).strip()
+
+
     # Enqueue non-empty stripped parts to the TTS queue
     @staticmethod
     async def _enqueue_parts(parts: list[str], queue: asyncio.Queue, label: str) -> None:
         for part in parts:
-            stripped = part.strip()
+            stripped = AIAgent._strip_markdown(part)
             if stripped:
                 logger.debug("Streaming %s: %s", label, stripped)
                 await queue.put(stripped)
@@ -323,7 +357,7 @@ class AIAgent:
     @staticmethod
     async def _try_clause_split(buffer: str, queue: asyncio.Queue) -> str:
         clauses = _CLAUSE_RE.split(buffer)
-        first_clause = clauses[0].strip() if len(clauses) > 1 else ""
+        first_clause = AIAgent._strip_markdown(clauses[0]) if len(clauses) > 1 else ""
 
         if not first_clause or len(first_clause) < _MIN_CLAUSE_LEN:
             return buffer
@@ -339,7 +373,7 @@ class AIAgent:
     # Push any remaining text in buffer to queue
     @staticmethod
     async def _flush_remainder(buffer: str, queue: asyncio.Queue) -> None:
-        remainder = buffer.strip()
+        remainder = AIAgent._strip_markdown(buffer)
         if remainder:
             logger.debug("Streaming final: %s", remainder)
             await queue.put(remainder)
@@ -357,7 +391,7 @@ class AIAgent:
             tool_calls = message.get("tool_calls", [])
 
             if not tool_calls:
-                return message.get("content", "").strip()
+                return self._strip_markdown(message.get("content", ""))
 
             messages.append(message)
             for tool_call in tool_calls:

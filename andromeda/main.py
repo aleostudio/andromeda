@@ -58,6 +58,7 @@ class VoiceAssistant:
         self._response_text = ""
         self._speech_energy: float = 0.0
         self._is_follow_up: bool = False  # True when listening for follow-up (no wake word needed)
+        self._tts_interrupted: bool = False  # True when TTS was interrupted by wake word
 
 
     # Initialize all components. Call before run().
@@ -150,6 +151,10 @@ class VoiceAssistant:
         try:
             await self._sm.run()
         finally:
+            try:
+                self._wake_word.shutdown()
+            except Exception:
+                logger.warning("Error shutting down wake word detector")
             try:
                 self._audio.stop()
             except Exception:
@@ -287,7 +292,7 @@ class VoiceAssistant:
             return AssistantState.SPEAKING
 
         # No fast match — use LLM
-        self._audio.mute()
+        self._tts_interrupted = False
         try:
             if self._cfg.agent.streaming:
                 with self._metrics.measure("llm_streaming"):
@@ -299,23 +304,69 @@ class VoiceAssistant:
             self._audio.unmute()
 
         self._metrics.end_pipeline()
+
+        if self._tts_interrupted:
+            logger.info("TTS was interrupted by voice command, returning to IDLE")
+            return AssistantState.IDLE
+
         return AssistantState.SPEAKING
 
 
     # Standard mode: wait for full response, then speak
     async def _process_standard(self, text: str) -> None:
+        self._audio.mute()
         self._response_text = await self._agent.process(text)
+
+        # Enable wake word detection during TTS for voice interruption
+        self._wake_word.reset()
+        self._audio.monitor_only()
+
+        monitor_task = asyncio.create_task(self._monitor_interrupt())
         with self._metrics.measure("tts"):
             await self._tts.speak(self._response_text)
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
 
 
     # Streaming mode: speak sentence-by-sentence as LLM generates
     async def _process_streaming(self, text: str) -> None:
         sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
+
+        # Enable wake word detection during TTS for voice interruption
+        self._wake_word.reset()
+        self._audio.monitor_only()
+
         agent_task = asyncio.create_task(self._agent.process_streaming(text, sentence_queue))
         tts_task = asyncio.create_task(self._tts.speak_streamed(sentence_queue))
+        monitor_task = asyncio.create_task(self._monitor_interrupt())
+
         self._response_text = await agent_task
         await tts_task
+        monitor_task.cancel()
+        try:
+            await monitor_task
+        except asyncio.CancelledError:
+            pass
+
+
+    # Monitor wake word during TTS playback to allow voice interruption
+    async def _monitor_interrupt(self) -> None:
+        loop = asyncio.get_event_loop()
+        try:
+            while True:
+                detected = await loop.run_in_executor(
+                    None, lambda: self._wake_word.wait_for_detection(timeout=0.5),
+                )
+                if detected:
+                    logger.info("Interrupt: wake word detected during speech")
+                    self._tts.stop_playback()
+                    self._tts_interrupted = True
+                    return
+        except asyncio.CancelledError:
+            return
 
 
     # SPEAKING: After TTS is done, decide whether to listen for follow-up

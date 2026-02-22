@@ -20,8 +20,9 @@ AudioFrameCallback = Callable[[bytes, np.ndarray], None]
 
 
 class AudioRouteMode(Enum):
-    NORMAL = auto() # frames go to all listeners (wake word + VAD)
-    MUTED = auto()  # frames dropped entirely
+    NORMAL = auto()       # frames go to all listeners (wake word + VAD) and buffers
+    MUTED = auto()        # frames dropped entirely
+    MONITOR_ONLY = auto() # frames dispatched to callbacks only (no buffer/recording)
 
 
 # Continuous audio capture from microphone with ring buffer
@@ -82,6 +83,11 @@ class AudioCapture:
     # Unmute input (normal mode)
     def unmute(self) -> None:
         self._route_mode = AudioRouteMode.NORMAL
+
+
+    # Monitor-only mode: dispatch frames to callbacks (wake word) but skip buffers
+    def monitor_only(self) -> None:
+        self._route_mode = AudioRouteMode.MONITOR_ONLY
 
 
     # Start collecting audio into recording buffer
@@ -156,12 +162,14 @@ class AudioCapture:
         frame_array = indata[:, 0] if indata.ndim > 1 else indata
         frame_int16 = frame_array.view(np.int16)
 
-        with self._lock:
-            self._ring_buffer.append(frame_bytes)
-            if self._is_recording:
-                self._recording_buffer.append(frame_bytes)
+        # In NORMAL mode, also buffer audio for ring buffer and recording
+        if self._route_mode == AudioRouteMode.NORMAL:
+            with self._lock:
+                self._ring_buffer.append(frame_bytes)
+                if self._is_recording:
+                    self._recording_buffer.append(frame_bytes)
 
-        # Dispatch both bytes and numpy to all listeners
+        # Dispatch to callbacks (NORMAL and MONITOR_ONLY)
         for cb in self._on_audio_frame:
             try:
                 cb(frame_bytes, frame_int16)
