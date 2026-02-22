@@ -10,7 +10,7 @@ import time
 import httpx
 from andromeda.config import AgentConfig, ConversationConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ AGENT ]")
 
 # Regex to split on sentence endings AND mid-sentence pauses (commas, semicolons, colons)
 # Uses (?<=\D\.) to avoid splitting on numbered list items like "2. Taglia..."
@@ -419,22 +419,22 @@ class AIAgent:
         func_name = func.get("name", "")
         func_args = self._parse_tool_args(func.get("arguments", {}))
 
-        logger.info("Tool called: %s | args: %s", func_name, json.dumps(func_args, ensure_ascii=False))
+        logger.info("[ TOOL ] called: %s | args: %s", func_name, json.dumps(func_args, ensure_ascii=False))
 
         handler = self._tool_handlers.get(func_name)
         if not handler:
-            logger.warning("Tool '%s' not registered", func_name)
-            return f"Tool '{func_name}' not available"
+            logger.warning("[ TOOL ] '%s' not registered", func_name)
+            return f"[ TOOL ] '{func_name}' not available"
 
         try:
             if inspect.iscoroutinefunction(handler):
                 result = await handler(func_args)
             else:
                 result = handler(func_args)
-            logger.info("Tool %s result: %s", func_name, str(result)[:200])
+            logger.info("[ TOOL ] %s result: %s", func_name, str(result)[:200])
             return str(result)
         except Exception as e:
-            logger.exception("Tool %s failed: %s", func_name, e)
+            logger.exception("[ TOOL ] %s failed: %s", func_name, e)
             return f"Error: {e}"
 
 

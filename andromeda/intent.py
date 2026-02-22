@@ -5,7 +5,7 @@ import inspect
 import logging
 import re
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ INTENT ]")
 
 
 # Fast intent matcher — intercepts simple requests before they reach the LLM.

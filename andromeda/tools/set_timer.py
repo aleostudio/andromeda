@@ -5,7 +5,8 @@ import asyncio
 import logging
 import time
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ TOOL SET TIMER ]")
+
 
 _feedback = None
 _max_sec: int = 3600

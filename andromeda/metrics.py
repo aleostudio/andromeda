@@ -6,7 +6,7 @@ import time
 from contextlib import contextmanager
 from dataclasses import dataclass
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ METRICS ]")
 
 
 # Stores latency stats for a single phase
@@ -50,7 +50,7 @@ class PerformanceMetrics:
             if phase_name not in self._phases:
                 self._phases[phase_name] = PhaseMetric(name=phase_name)
             self._phases[phase_name].record(duration_ms)
-            logger.info("[PERF] %s: %.0fms", phase_name, duration_ms)
+            logger.debug("[PERF] %s: %.0fms", phase_name, duration_ms)
 
 
     # Mark the start of a full wake-to-response pipeline
@@ -62,7 +62,7 @@ class PerformanceMetrics:
     def end_pipeline(self) -> None:
         if self._pipeline_start > 0:
             total_ms = (time.monotonic() - self._pipeline_start) * 1000
-            logger.info("[PERF] pipeline_total: %.0fms", total_ms)
+            logger.debug("[PERF] pipeline_total: %.0fms", total_ms)
             if "pipeline_total" not in self._phases:
                 self._phases["pipeline_total"] = PhaseMetric(name="pipeline_total")
             self._phases["pipeline_total"].record(total_ms)
@@ -86,9 +86,9 @@ class PerformanceMetrics:
     def log_summary(self) -> None:
         if not self._phases:
             return
-        logger.info("[PERF] === Performance Summary ===")
+        logger.debug("[PERF] === Performance Summary ===")
         for name, m in sorted(self._phases.items()):
-            logger.info("[PERF]   %s: avg=%.0fms, min=%.0fms, max=%.0fms, count=%d", name, m.avg_ms, m.min_ms, m.max_ms, m.count)
+            logger.debug("[PERF]   %s: avg=%.0fms, min=%.0fms, max=%.0fms, count=%d", name, m.avg_ms, m.min_ms, m.max_ms, m.count)
 
 
     # Clear all collected metrics

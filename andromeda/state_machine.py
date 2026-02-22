@@ -7,7 +7,7 @@ from collections.abc import Callable, Coroutine
 from enum import Enum, auto
 from typing import Any, TypeAlias
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ STATE ]")
 
 StateHandler: TypeAlias = Callable[["AssistantState"], Coroutine[Any, Any, "AssistantState"]]
 

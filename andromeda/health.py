@@ -6,7 +6,7 @@ import json
 import logging
 from andromeda.config import HealthCheckConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ HEALTH ]")
 
 
 # Lightweight async HTTP health check endpoint using raw asyncio (no extra deps)

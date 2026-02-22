@@ -8,7 +8,7 @@ import numpy as np
 import webrtcvad
 from andromeda.config import AudioConfig, VADConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ VAD ]")
 
 
 # Detect speech start/end using WebRTC VAD with adaptive energy filtering

@@ -6,7 +6,7 @@ import time
 import httpx
 from andromeda.tools.http_client import get_client
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ TOOL GET WEATHER ]")
 
 
 _timeout_sec: float = 10.0

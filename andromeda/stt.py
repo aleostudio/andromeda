@@ -6,7 +6,7 @@ import logging
 import numpy as np
 from andromeda.config import STTConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ STT ]")
 
 
 # Local speech-to-text using faster-whisper (CTranslate2)

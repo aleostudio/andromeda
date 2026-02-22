@@ -4,7 +4,7 @@
 import asyncio
 import logging
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ TOOL SYSTEM CONTROL ]")
 
 
 # AppleScript commands for macOS system control

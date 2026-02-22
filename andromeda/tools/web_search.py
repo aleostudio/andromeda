@@ -8,7 +8,7 @@ from urllib.parse import parse_qs, unquote, urlparse
 from bs4 import BeautifulSoup
 from andromeda.tools.http_client import get_client
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ TOOL WEB SEARCH ]")
 
 
 _timeout_sec: float = 10.0

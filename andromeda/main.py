@@ -5,6 +5,7 @@ import warnings
 warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 
 import asyncio
+import contextlib
 import logging
 import signal
 import sys
@@ -25,7 +26,7 @@ from andromeda.tts import TextToSpeech
 from andromeda.vad import VoiceActivityDetector
 from andromeda.wake_word import WakeWordDetector
 
-logger = logging.getLogger("andromeda.main")
+logger = logging.getLogger("[ MAIN ]")
 
 
 # Main application class that wires all components together
@@ -325,10 +326,8 @@ class VoiceAssistant:
         with self._metrics.measure("tts"):
             await self._tts.speak(self._response_text)
         monitor_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await monitor_task
-        except asyncio.CancelledError:
-            pass
 
 
     # Streaming mode: speak sentence-by-sentence as LLM generates
@@ -341,32 +340,33 @@ class VoiceAssistant:
 
         agent_task = asyncio.create_task(self._agent.process_streaming(text, sentence_queue))
         tts_task = asyncio.create_task(self._tts.speak_streamed(sentence_queue))
-        monitor_task = asyncio.create_task(self._monitor_interrupt())
+        monitor_task = asyncio.create_task(self._monitor_interrupt(tasks_to_cancel=[agent_task]))
 
-        self._response_text = await agent_task
+        self._response_text = ""
+        with contextlib.suppress(asyncio.CancelledError):
+            self._response_text = await agent_task
+
         await tts_task
         monitor_task.cancel()
-        try:
+        with contextlib.suppress(asyncio.CancelledError):
             await monitor_task
-        except asyncio.CancelledError:
-            pass
 
 
     # Monitor wake word during TTS playback to allow voice interruption
-    async def _monitor_interrupt(self) -> None:
+    async def _monitor_interrupt(self, tasks_to_cancel: list[asyncio.Task] | None = None) -> None:
         loop = asyncio.get_event_loop()
-        try:
-            while True:
-                detected = await loop.run_in_executor(
-                    None, lambda: self._wake_word.wait_for_detection(timeout=0.5),
-                )
-                if detected:
-                    logger.info("Interrupt: wake word detected during speech")
-                    self._tts.stop_playback()
-                    self._tts_interrupted = True
-                    return
-        except asyncio.CancelledError:
-            return
+        while True:
+            detected = await loop.run_in_executor(
+                None, lambda: self._wake_word.wait_for_detection(timeout=0.5),
+            )
+            if detected:
+                logger.info("Interrupt: wake word detected during speech")
+                self._tts.stop_playback()
+                self._tts_interrupted = True
+                if tasks_to_cancel:
+                    for task in tasks_to_cancel:
+                        task.cancel()
+                return
 
 
     # SPEAKING: After TTS is done, decide whether to listen for follow-up
@@ -466,9 +466,8 @@ def main() -> None:
     loop.add_signal_handler(signal.SIGTERM, shutdown_handler)
 
     try:
-        loop.run_until_complete(assistant.run())
-    except asyncio.CancelledError:
-        pass
+        with contextlib.suppress(asyncio.CancelledError):
+            loop.run_until_complete(assistant.run())
     finally:
         loop.run_until_complete(assistant.shutdown())
         loop.close()

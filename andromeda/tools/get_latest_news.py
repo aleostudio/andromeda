@@ -9,7 +9,8 @@ from datetime import datetime
 from bs4 import BeautifulSoup
 from andromeda.tools.http_client import get_client
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ TOOL GET LATEST NEWS ]")
+
 
 # Result cache: maps category -> (result_str, timestamp)
 _cache: dict[str, tuple[str, float]] = {}

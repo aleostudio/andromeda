@@ -11,7 +11,7 @@ import numpy as np
 import sounddevice as sd
 from andromeda.config import AudioConfig, TTSConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ TTS ]")
 
 # Fade duration in samples applied to the end of each sentence to prevent audio pops
 _FADE_SAMPLES = 64
@@ -167,13 +167,20 @@ class TextToSpeech:
 
     # Consume next valid sentence from the queue; returns None on stop/end-of-stream
     async def _next_sentence(self, queue: asyncio.Queue) -> str | None:
-        sentence = await queue.get()
-        if sentence is None:
-            return None
+        while not self._stop_event.is_set():
+            try:
+                sentence = await asyncio.wait_for(queue.get(), timeout=0.2)
+            except asyncio.TimeoutError:
+                continue
 
-        stripped = sentence.strip()
+            if sentence is None:
+                return None
 
-        return stripped or await self._next_sentence(queue)
+            stripped = sentence.strip()
+            if stripped:
+                return stripped
+
+        return None
 
 
     # Open the shared playback stream; returns True on success

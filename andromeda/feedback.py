@@ -7,7 +7,7 @@ import sounddevice as sd
 from pathlib import Path
 from andromeda.config import AudioConfig, FeedbackConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ FEEDBACK ]")
 
 
 # Play short audio cues for state transitions

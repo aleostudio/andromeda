@@ -8,7 +8,7 @@ from andromeda.feedback import AudioFeedback
 from andromeda.intent import register_intent
 from andromeda.tools import (get_datetime, get_latest_news, get_weather, knowledge_base, set_timer, system_control, web_search)
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ TOOLS ]")
 
 
 # Tools list

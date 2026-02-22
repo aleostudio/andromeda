@@ -10,7 +10,7 @@ from collections.abc import Callable
 from enum import Enum, auto
 from andromeda.config import AudioConfig, NoiseConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ AUDIO CAPTURE ]")
 
 # Minimum SNR (in dB) below which noise reduction is applied
 _NOISE_SNR_THRESHOLD_DB = 15.0

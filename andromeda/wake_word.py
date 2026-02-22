@@ -7,7 +7,7 @@ import numpy as np
 from pathlib import Path
 from andromeda.config import AudioConfig, WakeWordConfig
 
-logger = logging.getLogger(__name__)
+logger = logging.getLogger("[ WAKE WORD ]")
 
 
 # Detects custom wake word from audio frames using OpenWakeWord
