@@ -7,6 +7,7 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 import asyncio
 import contextlib
 import logging
+import platform
 import signal
 import sys
 import webrtcvad
@@ -39,7 +40,7 @@ class VoiceAssistant:
         self._audio = AudioCapture(config.audio, config.noise)
         self._wake_word = WakeWordDetector(config.audio, config.wake_word)
         self._vad = VoiceActivityDetector(config.audio, config.vad)
-        self._stt = SpeechRecognizer(config.stt)
+        self._stt = SpeechRecognizer(config.stt, speech_pad_ms=config.vad.speech_pad_ms)
         self._agent = AIAgent(config.agent, config.conversation)
         self._tts = TextToSpeech(config.audio, config.tts)
         self._feedback = AudioFeedback(config.audio, config.feedback)
@@ -60,6 +61,7 @@ class VoiceAssistant:
         self._speech_energy: float = 0.0
         self._is_follow_up: bool = False  # True when listening for follow-up (no wake word needed)
         self._tts_interrupted: bool = False  # True when TTS was interrupted by wake word
+        self._calibration_vad = webrtcvad.Vad(config.vad.aggressiveness)  # Reuse for calibration
 
 
     # Initialize all components. Call before run().
@@ -106,6 +108,8 @@ class VoiceAssistant:
             self._tts.initialize()
         except Exception:
             logger.exception("Failed to initialize TTS engine")
+            if platform.system() != "Darwin":
+                raise RuntimeError("TTS engine is required on non-macOS platforms")
 
         if self._cfg.tts.prewarm_cache:
             try:
@@ -177,15 +181,14 @@ class VoiceAssistant:
         self._is_follow_up = False
 
         # Wait for wake word detection (runs in thread via event)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         detected = await loop.run_in_executor(None, lambda: self._wake_word.wait_for_detection(timeout=None))
 
         if detected:
             self._metrics.start_pipeline()
 
             # Calibrate speech energy from the ring buffer audio
-            calibration_vad = webrtcvad.Vad(self._cfg.vad.aggressiveness)
-            self._speech_energy = self._audio.calibrate_speech_energy(calibration_vad, self._cfg.audio.sample_rate)
+            self._speech_energy = self._audio.calibrate_speech_energy(self._calibration_vad, self._cfg.audio.sample_rate)
             energy_threshold = self._speech_energy * self._cfg.vad.energy_threshold_factor
             self._vad.set_energy_threshold(energy_threshold)
             logger.info("Calibrated speech energy: %.1f, VAD energy threshold: %.1f", self._speech_energy, energy_threshold)
@@ -205,7 +208,7 @@ class VoiceAssistant:
         self._vad.start()
 
         # Wait for speech to end
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: self._vad.wait_for_speech_end(timeout=self._cfg.vad.max_recording_sec + 1))
 
         self._vad.stop()
@@ -219,7 +222,7 @@ class VoiceAssistant:
         if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
             logger.info("Recording too short or no speech detected, asking user to retry")
             await self._speak_error("Non ho sentito nulla. Riprova.")
-            return AssistantState.SPEAKING
+            return AssistantState.IDLE
 
         self._feedback.play("done")
 
@@ -240,7 +243,7 @@ class VoiceAssistant:
         self._vad.start()
 
         # Wait for speech end OR follow-up timeout (whichever comes first)
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         await loop.run_in_executor(None, lambda: self._vad.wait_for_speech_end(timeout=follow_up_timeout))
 
         self._vad.stop()
@@ -343,8 +346,14 @@ class VoiceAssistant:
         monitor_task = asyncio.create_task(self._monitor_interrupt(tasks_to_cancel=[agent_task]))
 
         self._response_text = ""
-        with contextlib.suppress(asyncio.CancelledError):
-            self._response_text = await agent_task
+        try:
+            with contextlib.suppress(asyncio.CancelledError):
+                self._response_text = await agent_task
+        except Exception:
+            logger.exception("Agent streaming failed")
+            # Ensure TTS gets the sentinel so it doesn't hang forever
+            with contextlib.suppress(Exception):
+                await sentence_queue.put(None)
 
         await tts_task
         monitor_task.cancel()
@@ -354,7 +363,7 @@ class VoiceAssistant:
 
     # Monitor wake word during TTS playback to allow voice interruption
     async def _monitor_interrupt(self, tasks_to_cancel: list[asyncio.Task] | None = None) -> None:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         logger.debug("Interrupt monitoring active")
         poll_count = 0
 

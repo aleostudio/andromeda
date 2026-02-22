@@ -3,6 +3,8 @@
 
 import json
 import logging
+import os
+import tempfile
 from pathlib import Path
 
 logger = logging.getLogger("[ TOOL KNOWLEDGE BASE ]")
@@ -80,7 +82,18 @@ def _save_store(data: dict) -> None:
     global _cache
     path = Path(_store_path)
     path.parent.mkdir(parents=True, exist_ok=True)
-    path.write_text(json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+    # Atomic write: write to temp file then rename to prevent corruption on crash
+    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        os.replace(tmp_path, path)
+    except Exception:
+        os.unlink(tmp_path)
+        raise
+
     # Update in-memory cache after successful write
     _cache = data
 

@@ -2,7 +2,7 @@
 # Licensed under MIT
 
 import asyncio
-import hashlib
+import collections
 import io
 import logging
 import threading
@@ -35,9 +35,9 @@ class TextToSpeech:
 
         self._syn_config = None  # Piper SynthesisConfig, built on initialize()
 
-        # TTS audio cache: maps text hash -> (audio_array, sample_rate)
+        # TTS audio cache: maps normalized text -> (audio_array, sample_rate)
         self._cache: dict[str, tuple[np.ndarray, int]] = {}
-        self._cache_order: list[str] = []  # LRU tracking
+        self._cache_order: collections.deque[str] = collections.deque()  # LRU tracking
 
 
     # Load Piper voice model
@@ -123,7 +123,7 @@ class TextToSpeech:
 
     # Streaming Piper with prefetch: synthesize next sentence while playing current
     async def _speak_streamed_piper(self, sentence_queue: asyncio.Queue) -> None:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         stream_opened = False
         prefetch_task: asyncio.Task | None = None
         prefetch_result: tuple[str, np.ndarray, int] | None = None
@@ -313,7 +313,7 @@ class TextToSpeech:
 
     # Synthesize with Piper and play through sounddevice (chunk-by-chunk, interruptible)
     async def _speak_piper(self, text: str) -> None:
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         audio, sample_rate = await self._synthesize_cached(loop, text)
         _apply_fade_out(audio)
         await loop.run_in_executor(None, lambda: self._play_chunked(audio, sample_rate))
@@ -401,7 +401,7 @@ class TextToSpeech:
     # Cache helpers
     @staticmethod
     def _cache_key(text: str) -> str:
-        return hashlib.md5(text.strip().lower().encode()).hexdigest()
+        return text.strip().lower()
 
 
     def _cache_put(self, key: str, audio: np.ndarray, sample_rate: int) -> None:
@@ -409,7 +409,7 @@ class TextToSpeech:
             return
 
         if len(self._cache) >= _TTS_CACHE_MAX:
-            oldest = self._cache_order.pop(0)
+            oldest = self._cache_order.popleft()
             self._cache.pop(oldest, None)
         self._cache[key] = (audio.copy(), sample_rate)
         self._cache_order.append(key)

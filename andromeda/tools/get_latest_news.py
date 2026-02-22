@@ -15,6 +15,7 @@ logger = logging.getLogger("[ TOOL GET LATEST NEWS ]")
 # Result cache: maps category -> (result_str, timestamp)
 _cache: dict[str, tuple[str, float]] = {}
 _CACHE_TTL_SEC: float = 600.0  # 10 minutes
+_CACHE_MAX_SIZE: int = 50
 
 
 DEFINITION = {
@@ -152,8 +153,12 @@ async def handler(args: dict) -> str:
         for i, art in enumerate(articles, 1):
             news = news + str(i) + ": " + art['title'] + ". "
 
-        # Cache the result
+        # Cache the result (evict oldest if full)
+        if len(_cache) >= _CACHE_MAX_SIZE:
+            oldest_key = min(_cache, key=lambda k: _cache[k][1])
+            del _cache[oldest_key]
         _cache[cache_key] = (news, time.monotonic())
+
         return news
 
     except httpx.HTTPStatusError as e:

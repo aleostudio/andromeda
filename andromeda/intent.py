@@ -4,6 +4,7 @@
 import inspect
 import logging
 import re
+from collections.abc import Callable
 
 logger = logging.getLogger("[ INTENT ]")
 
@@ -15,7 +16,7 @@ logger = logging.getLogger("[ INTENT ]")
 _intents: list[dict] = []
 
 
-def register_intent(patterns: list[str], tool_handler: callable, args: dict | None = None) -> None:
+def register_intent(patterns: list[str], tool_handler: Callable, args: dict | None = None) -> None:
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
     _intents.append({"patterns": compiled, "handler": tool_handler, "args": args or {}})
 
@@ -36,7 +37,7 @@ async def match_and_execute(text: str) -> str | None:
     return None
 
 
-async def _run_handler(handler: callable, args: dict) -> str:
+async def _run_handler(handler: Callable, args: dict) -> str:
     try:
         if inspect.iscoroutinefunction(handler):
             return str(await handler(args))

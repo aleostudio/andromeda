@@ -4,6 +4,7 @@
 import logging
 import numpy as np
 import sounddevice as sd
+from collections.abc import Callable
 from pathlib import Path
 from andromeda.config import AudioConfig, FeedbackConfig
 
@@ -49,7 +50,7 @@ class AudioFeedback:
 
 
     # Load WAV file or generate synthetic tone
-    def _load_or_generate(self, wav_path: str, generator: callable) -> np.ndarray:
+    def _load_or_generate(self, wav_path: str, generator: Callable) -> np.ndarray:
         path = Path(wav_path)
         if path.exists():
             try:

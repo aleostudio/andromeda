@@ -14,6 +14,7 @@ _timeout_sec: float = 10.0
 # Result cache: maps city_name -> (result_str, timestamp)
 _cache: dict[str, tuple[str, float]] = {}
 _CACHE_TTL_SEC: float = 300.0  # 5 minutes
+_CACHE_MAX_SIZE: int = 50
 
 # WMO weather codes to Italian descriptions
 _WMO_CODES = {
@@ -129,7 +130,10 @@ async def handler(args: dict) -> str:
             f"vento {wind} km/h"
         )
 
-        # Cache the result
+        # Cache the result (evict oldest if full)
+        if len(_cache) >= _CACHE_MAX_SIZE:
+            oldest_key = min(_cache, key=lambda k: _cache[k][1])
+            del _cache[oldest_key]
         _cache[cache_key] = (result, time.monotonic())
 
         return result

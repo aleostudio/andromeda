@@ -55,14 +55,8 @@ class HealthCheckServer:
 
     async def _handle_connection(self, reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
         try:
-            # Read the HTTP request (we only care about the first line)
-            request_line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-
-            # Drain remaining headers
-            while True:
-                line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-                if line == b"\r\n" or line == b"\n" or not line:
-                    break
+            # Read the HTTP request (we only care about the first line, limit to 8KB)
+            request_line = await asyncio.wait_for(reader.read(8192), timeout=5.0)
 
             request_str = request_line.decode("utf-8", errors="replace").strip()
             logger.debug("Health check request: %s", request_str)

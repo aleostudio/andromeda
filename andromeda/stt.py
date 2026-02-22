@@ -12,8 +12,9 @@ logger = logging.getLogger("[ STT ]")
 # Local speech-to-text using faster-whisper (CTranslate2)
 class SpeechRecognizer:
 
-    def __init__(self, stt_cfg: STTConfig) -> None:
+    def __init__(self, stt_cfg: STTConfig, speech_pad_ms: int = 300) -> None:
         self._cfg = stt_cfg
+        self._speech_pad_ms = speech_pad_ms
         self._model = None
 
 
@@ -37,7 +38,7 @@ class SpeechRecognizer:
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
 
         return await loop.run_in_executor(None, self._transcribe_sync, audio)
 
@@ -50,7 +51,7 @@ class SpeechRecognizer:
                 language=self._cfg.language,
                 beam_size=self._cfg.beam_size,
                 vad_filter=self._cfg.vad_filter,
-                vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": 200},
+                vad_parameters={"min_silence_duration_ms": 500, "speech_pad_ms": self._speech_pad_ms},
             )
 
             # Collect all segment texts

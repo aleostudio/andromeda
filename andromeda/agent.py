@@ -8,14 +8,18 @@ import logging
 import re
 import time
 import httpx
+from collections.abc import Callable
 from andromeda.config import AgentConfig, ConversationConfig
 
 logger = logging.getLogger("[ AGENT ]")
 
+# Common Italian abbreviations that should NOT trigger sentence splitting
+_ABBREV = r'(?<![Dd]ott)(?<![Ss]ig)(?<![Pp]rof)(?<![Ii]ng)(?<![Aa]vv)(?<![Gg]en)(?<![Ee]cc)(?<![Ee]s)'
+
 # Regex to split on sentence endings AND mid-sentence pauses (commas, semicolons, colons)
 # Uses (?<=\D\.) to avoid splitting on numbered list items like "2. Taglia..."
-_SENTENCE_RE = re.compile(r'(?<=\D\.)\s+|(?<=[!?])\s+')
-_CLAUSE_RE = re.compile(r'(?<=\D\.)\s+|(?<=[!?;:,])\s+')
+_SENTENCE_RE = re.compile(rf'{_ABBREV}(?<=\D\.)\s+|(?<=[!?])\s+')
+_CLAUSE_RE = re.compile(rf'{_ABBREV}(?<=\D\.)\s+|(?<=[!?;:,])\s+')
 
 # Minimum clause length to push to TTS (avoid very short fragments)
 _MIN_CLAUSE_LEN = 20
@@ -39,14 +43,14 @@ class AIAgent:
         self._client: httpx.AsyncClient | None = None
         self._conversation: list[dict] = []
         self._tools: list[dict] = []
-        self._tool_handlers: dict[str, callable] = {}
-        self._max_history: int = 20  # Keep last N turns
+        self._tool_handlers: dict[str, Callable] = {}
+        self._max_history: int = conversation_cfg.max_history if conversation_cfg else 20
         self._last_interaction: float = 0.0  # monotonic timestamp of last interaction
-        self._compaction_threshold: int = 16  # Compact history when it reaches this many turns
+        self._compaction_threshold: int = conversation_cfg.compaction_threshold if conversation_cfg else 16
 
 
     def initialize(self) -> None:
-        self._client = httpx.AsyncClient(base_url=self._cfg.base_url, timeout=httpx.Timeout(120.0, connect=10.0))
+        self._client = httpx.AsyncClient(base_url=self._cfg.base_url, timeout=httpx.Timeout(self._cfg.timeout_sec, connect=10.0))
         logger.info("AI Agent initialized: model=%s, url=%s", self._cfg.model, self._cfg.base_url)
 
 
@@ -71,7 +75,7 @@ class AIAgent:
             logger.warning("Failed to pre-warm Ollama model", exc_info=True)
 
 
-    def register_tool(self, tool_definition: dict, handler: callable) -> None:
+    def register_tool(self, tool_definition: dict, handler: Callable) -> None:
         self._tools.append(tool_definition)
         func_name = tool_definition["function"]["name"]
         self._tool_handlers[func_name] = handler

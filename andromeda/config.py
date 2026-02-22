@@ -100,6 +100,7 @@ class AgentConfig:
     base_url: str = "http://localhost:11434"
     model: str = "llama3.1:8b"
     max_tokens: int = 500
+    timeout_sec: float = 60.0
     streaming: bool = True
     prewarm: bool = True
     system_prompt: str = (
@@ -115,6 +116,8 @@ class AgentConfig:
     def __post_init__(self) -> None:
         if self.max_tokens < 1:
             raise ValueError(f"max_tokens must be >= 1, got {self.max_tokens}")
+        if self.timeout_sec <= 0:
+            raise ValueError(f"timeout_sec must be > 0, got {self.timeout_sec}")
 
 
 @dataclass(frozen=True)
@@ -139,6 +142,8 @@ class FeedbackConfig:
 class ConversationConfig:
     follow_up_timeout_sec: float = 5.0
     history_timeout_sec: float = 300.0
+    max_history: int = 20
+    compaction_threshold: int = 16
 
 
 @dataclass(frozen=True)
@@ -155,7 +160,7 @@ class ToolsConfig:
 @dataclass(frozen=True)
 class HealthCheckConfig:
     enabled: bool = False
-    host: str = "0.0.0.0"
+    host: str = "127.0.0.1"
     port: int = 8080
 
     def __post_init__(self) -> None:

@@ -51,9 +51,10 @@ async def _timer_task(timer_id: str, seconds: int, label: str) -> None:
         await asyncio.sleep(seconds)
         logger.info("Timer '%s' (%s) completed", timer_id, label)
         if _feedback:
-            # Play wake sound 3 times as alarm
+            loop = asyncio.get_running_loop()
+            # Play wake sound 3 times as alarm (in executor to avoid blocking event loop)
             for _ in range(3):
-                _feedback.play_blocking("wake")
+                await loop.run_in_executor(None, _feedback.play_blocking, "wake")
                 await asyncio.sleep(0.3)
     except asyncio.CancelledError:
         logger.info("Timer '%s' cancelled", timer_id)
@@ -75,8 +76,8 @@ def handler(args: dict) -> str:
     if seconds > _max_sec:
         return f"Errore: la durata massima è {_max_sec} secondi ({_max_sec // 60} minuti)."
 
-    timer_id = f"{label}_{int(time.time())}"
-    task = asyncio.create_task(_timer_task(timer_id, seconds, label))
+    timer_id = f"{label}_{time.monotonic_ns()}"
+    task = asyncio.get_running_loop().create_task(_timer_task(timer_id, seconds, label))
     _active_timers[timer_id] = task
 
     if seconds >= 60:
