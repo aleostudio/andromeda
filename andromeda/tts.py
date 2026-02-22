@@ -33,6 +33,8 @@ class TextToSpeech:
         self._playback_stream: sd.OutputStream | None = None
         self._fallback_proc: asyncio.subprocess.Process | None = None
 
+        self._syn_config = None  # Piper SynthesisConfig, built on initialize()
+
         # TTS audio cache: maps text hash -> (audio_array, sample_rate)
         self._cache: dict[str, tuple[np.ndarray, int]] = {}
         self._cache_order: list[str] = []  # LRU tracking
@@ -42,9 +44,14 @@ class TextToSpeech:
     def initialize(self) -> None:
         try:
             from piper import PiperVoice
+            from piper.config import SynthesisConfig
 
             self._voice = PiperVoice.load(self._tts_cfg.model_path, config_path=self._tts_cfg.model_config)
-            logger.info("Piper TTS loaded: %s", self._tts_cfg.model_path)
+            self._syn_config = SynthesisConfig(
+                speaker_id=self._tts_cfg.speaker_id or None,
+                length_scale=self._tts_cfg.length_scale or None,
+            )
+            logger.info("Piper TTS loaded: %s (length_scale=%.2f)", self._tts_cfg.model_path, self._tts_cfg.length_scale)
 
         except FileNotFoundError:
             logger.warning("Piper model not found at %s. Falling back to macOS 'say' command.", self._tts_cfg.model_path)
@@ -305,7 +312,7 @@ class TextToSpeech:
         try:
             wav_buffer = io.BytesIO()
             with wave.open(wav_buffer, "wb") as wav_file:
-                self._voice.synthesize_wav(text, wav_file)
+                self._voice.synthesize_wav(text, wav_file, syn_config=self._syn_config)
 
             wav_buffer.seek(0)
             with wave.open(wav_buffer, "rb") as wav_file:
