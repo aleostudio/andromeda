@@ -7,7 +7,6 @@ warnings.filterwarnings("ignore", message="pkg_resources is deprecated")
 import asyncio
 import contextlib
 import logging
-import platform
 import signal
 import sys
 import webrtcvad
@@ -108,8 +107,7 @@ class VoiceAssistant:
             self._tts.initialize()
         except Exception:
             logger.exception("Failed to initialize TTS engine")
-            if platform.system() != "Darwin":
-                raise RuntimeError("TTS engine is required on non-macOS platforms")
+            raise
 
         if self._cfg.tts.prewarm_cache:
             try:

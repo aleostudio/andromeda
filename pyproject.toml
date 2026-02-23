@@ -24,7 +24,6 @@ dev = [
     "pytest-asyncio>=0.23",
     "ruff>=0.5.0",
 ]
-
 [project.scripts]
 voice-assistant = "andromeda.main:main"
 

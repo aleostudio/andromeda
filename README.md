@@ -262,7 +262,7 @@ Andromeda comes with the following built-in tools that the LLM can invoke:
 | `get_latest_news` | Scrapes latest news from Il Post by category (cached 10 min) |
 | `knowledge_base` | Persistent key-value memory (save, recall, list, delete) |
 | `set_timer` | Countdown timer with audio alarm |
-| `system_control` | macOS volume and brightness control via AppleScript |
+| `system_control` | Volume and brightness control (macOS, Linux, Windows) |
 | `web_search` | Web search fallback via DuckDuckGo with offline detection |
 
 ### Fast intents (no LLM)

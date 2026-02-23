@@ -32,7 +32,6 @@ class TextToSpeech:
         self._is_speaking = False
         self._stop_event = threading.Event()
         self._playback_stream: sd.OutputStream | None = None
-        self._fallback_proc: asyncio.subprocess.Process | None = None
         self._syn_config = None
         self._on_first_audio: Callable[[], None] | None = None
 
@@ -61,18 +60,15 @@ class TextToSpeech:
             logger.info("Piper TTS loaded: %s (length_scale=%.2f)", self._tts_cfg.model_path, self._tts_cfg.length_scale)
 
         except FileNotFoundError:
-            logger.warning("Piper model not found at %s. Falling back to macOS 'say' command.", self._tts_cfg.model_path)
-            self._voice = None
+            logger.error("Piper model not found at %s", self._tts_cfg.model_path)
+            raise
         except Exception:
             logger.exception("Failed to load Piper TTS")
-            self._voice = None
+            raise
 
 
     # Pre-warm the TTS cache with commonly used phrases
     def prewarm_cache(self, phrases: list[str] | None = None) -> None:
-        if not self._voice:
-            return
-
         default_phrases = [
             "Non ho sentito nulla. Riprova.",
             "Non ho capito. Puoi ripetere?",
@@ -101,10 +97,7 @@ class TextToSpeech:
         logger.info("TTS speaking: %s", text[:80])
 
         try:
-            if self._voice:
-                await self._speak_piper(text)
-            else:
-                await self._speak_macos_fallback(text)
+            await self._speak_piper(text)
         except Exception:
             logger.exception("TTS playback failed")
         finally:
@@ -118,10 +111,7 @@ class TextToSpeech:
         self._stop_event.clear()
 
         try:
-            if self._voice:
-                await self._speak_streamed_piper(sentence_queue)
-            else:
-                await self._speak_streamed_fallback(sentence_queue)
+            await self._speak_streamed_piper(sentence_queue)
         except Exception:
             logger.exception("TTS streamed playback failed")
         finally:
@@ -279,44 +269,14 @@ class TextToSpeech:
         return audio, sr
 
 
-    # Streaming fallback: macOS 'say' sentence by sentence
-    async def _speak_streamed_fallback(self, sentence_queue: asyncio.Queue) -> None:
-        while True:
-            if self._stop_event.is_set():
-                break
-
-            sentence = await sentence_queue.get()
-
-            if sentence is None:
-                break
-
-            sentence = sentence.strip()
-            if not sentence:
-                continue
-
-            logger.info("TTS streaming sentence: %s", " ".join(sentence[:200].split()))
-            await self._speak_macos_fallback(sentence)
-
-            if self._stop_event.is_set():
-                break
-
-
-    # Interrupt current TTS playback immediately
+# Interrupt current TTS playback immediately
     def stop_playback(self) -> None:
         logger.info("TTS playback interrupted")
         self._stop_event.set()
 
-        # Stop Piper audio stream
         if self._playback_stream and self._playback_stream.active:
             try:
                 self._playback_stream.stop()
-            except Exception:
-                pass
-
-        # Terminate macOS 'say' subprocess
-        if self._fallback_proc and self._fallback_proc.returncode is None:
-            try:
-                self._fallback_proc.terminate()
             except Exception:
                 pass
 
@@ -394,18 +354,7 @@ class TextToSpeech:
             self._playback_stream = None
 
 
-    # Fallback to macOS built-in 'say' command (interruptible)
-    async def _speak_macos_fallback(self, text: str) -> None:
-        try:
-            self._fallback_proc = await asyncio.create_subprocess_exec("say", "-v", "Alice", "-r", "180", text)
-            await self._fallback_proc.wait()
-        except Exception:
-            logger.warning("macOS 'say' fallback failed")
-        finally:
-            self._fallback_proc = None
-
-
-    # Check if is currently speaking
+# Check if is currently speaking
     @property
     def is_speaking(self) -> bool:
         return self._is_speaking

@@ -225,9 +225,9 @@ class TestSystemControl:
 
     @pytest.mark.asyncio
     @patch("asyncio.create_subprocess_exec", side_effect=FileNotFoundError)
-    async def test_osascript_not_found(self, mock_exec):
+    async def test_command_not_found(self, mock_exec):
         result = await system_control.handler({"action": "volume_up"})
-        assert "osascript non disponibile" in result
+        assert "Comando non trovato" in result
 
     def test_definition_structure(self):
         assert system_control.DEFINITION["function"]["name"] == "system_control"
