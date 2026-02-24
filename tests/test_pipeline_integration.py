@@ -6,7 +6,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import numpy as np
 import pytest
 from andromeda.main import VoiceAssistant
-from andromeda.messages import GENERIC_ERROR_RETRY
+from andromeda.messages import msg
 from andromeda.metrics import PerformanceMetrics
 from andromeda.state_machine import AssistantState
 
@@ -53,5 +53,5 @@ class TestPipelineIntegration:
             next_state = await VoiceAssistant._handle_processing(assistant, AssistantState.PROCESSING)
 
         assert next_state == AssistantState.SPEAKING
-        assistant._speak_error.assert_awaited_once_with(GENERIC_ERROR_RETRY)
-        assert assistant._response_text == GENERIC_ERROR_RETRY
+        assistant._speak_error.assert_awaited_once_with(msg("core.generic_error_retry"))
+        assert assistant._response_text == msg("core.generic_error_retry")

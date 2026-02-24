@@ -5,6 +5,7 @@ import logging
 import time
 import httpx
 from dataclasses import dataclass, field
+from andromeda.messages import msg, weather_condition
 from andromeda.tools.http_client import request_with_retry
 
 logger = logging.getLogger("[ TOOL GET WEATHER ]")
@@ -21,32 +22,6 @@ class _WeatherState:
 
 
 _state = _WeatherState()
-
-# WMO weather codes to Italian descriptions
-_WMO_CODES = {
-    0: "cielo sereno",
-    1: "prevalentemente sereno",
-    2: "parzialmente nuvoloso",
-    3: "coperto",
-    45: "nebbia",
-    48: "nebbia con brina",
-    51: "pioggerella leggera",
-    53: "pioggerella moderata",
-    55: "pioggerella intensa",
-    61: "pioggia leggera",
-    63: "pioggia moderata",
-    65: "pioggia forte",
-    71: "neve leggera",
-    73: "neve moderata",
-    75: "neve forte",
-    80: "rovesci leggeri",
-    81: "rovesci moderati",
-    82: "rovesci violenti",
-    95: "temporale",
-    96: "temporale con grandine leggera",
-    99: "temporale con grandine forte",
-}
-
 
 DEFINITION = {
     "type": "function",
@@ -78,7 +53,7 @@ def configure(timeout_sec: float) -> None:
 async def handler(args: dict) -> str:
     city = args.get("city", "").strip()
     if not city:
-        return "Errore: nessuna città specificata."
+        return msg("weather.missing_city")
 
     # Check cache first
     cache_key = city.lower()
@@ -95,13 +70,13 @@ async def handler(args: dict) -> str:
             "GET",
             "https://geocoding-api.open-meteo.com/v1/search",
             params={"name": city, "count": 1, "language": "it"},
-            timeout=_state.timeout_sec,
+            timeout_sec=_state.timeout_sec,
         )
         geo_data = geo_resp.json()
 
         results = geo_data.get("results", [])
         if not results:
-            return f"Non ho trovato la città '{city}'."
+            return msg("weather.city_not_found", city=city)
 
         loc = results[0]
         lat, lon = loc["latitude"], loc["longitude"]
@@ -117,7 +92,7 @@ async def handler(args: dict) -> str:
                 "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
                 "timezone": "auto",
             },
-            timeout=_state.timeout_sec,
+            timeout_sec=_state.timeout_sec,
         )
         weather_data = weather_resp.json()
         current = weather_data.get("current", {})
@@ -125,13 +100,14 @@ async def handler(args: dict) -> str:
         humidity = current.get("relative_humidity_2m", "N/D")
         wind = current.get("wind_speed_10m", "N/D")
         code = current.get("weather_code", -1)
-        condition = _WMO_CODES.get(code, "condizioni sconosciute")
-
-        result = (
-            f"Meteo a {city_name}: {condition}, "
-            f"temperatura {temp}°C, "
-            f"umidità {humidity}%, "
-            f"vento {wind} km/h"
+        condition = weather_condition(code)
+        result = msg(
+            "weather.output",
+            city=city_name,
+            condition=condition,
+            temp=temp,
+            humidity=humidity,
+            wind=wind,
         )
 
         # Cache the result (evict oldest if full)
@@ -144,13 +120,13 @@ async def handler(args: dict) -> str:
 
     except httpx.ConnectError:
         logger.error("Cannot connect to Open-Meteo API")
-        return "Non riesco a connettermi al servizio meteo. Verifica la connessione internet."
+        return msg("weather.connection_error")
     except httpx.TimeoutException:
         logger.error("Open-Meteo request timed out")
-        return "La richiesta meteo ha impiegato troppo tempo."
+        return msg("weather.timeout")
     except RuntimeError:
         logger.error("Open-Meteo circuit breaker open")
-        return "Il servizio meteo è temporaneamente non disponibile. Riprova tra poco."
+        return msg("weather.unavailable")
     except Exception:
         logger.exception("Weather tool failed")
-        return "Errore nel recupero dei dati meteo."
+        return msg("weather.generic_error")

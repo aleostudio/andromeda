@@ -9,6 +9,7 @@ import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
+from andromeda.messages import msg
 
 logger = logging.getLogger("[ TOOL KNOWLEDGE BASE ]")
 audit_logger = logging.getLogger("[ TOOL AUDIT ]")
@@ -138,53 +139,53 @@ def _save_store(data: dict) -> None:
 
 def _action_save(store: dict, key: str, value: str, allow_sensitive: bool) -> str:
     if not key or not value:
-        return "Errore: serve sia una chiave che un valore per salvare."
+        return msg("kb.save_missing_fields")
     key_value_text = f"{key} {value}"
     is_sensitive = _is_sensitive_text(key_value_text)
     if is_sensitive and not _state.allow_sensitive_memory and not allow_sensitive:
         audit_logger.info("tool=knowledge_base action=save_blocked_sensitive key=%s", key)
-        return "Dato sensibile rilevato. Per salvare questa informazione imposta allow_sensitive a true dopo conferma esplicita."
+        return msg("kb.sensitive_blocked")
     store[key] = value
     _save_store(store)
     logger.info("Knowledge base: saved '%s'", key)
     audit_logger.info("tool=knowledge_base action=save key=%s", key)
 
-    return f"Ho memorizzato '{key}': {value}"
+    return msg("kb.saved", key=key, value=value)
 
 
 def _action_recall(store: dict, key: str) -> str:
     if not key:
-        return "Errore: specifica quale informazione vuoi recuperare."
+        return msg("kb.recall_missing_key")
     result = store.get(key)
     if result is not None:
         return f"{key}: {result}"
     # Fuzzy search: check if key is substring of any stored key
     matches = {k: v for k, v in store.items() if key.lower() in k.lower()}
     if not matches:
-        return f"Non ho trovato nulla per '{key}'."
+        return msg("kb.recall_not_found", key=key)
     parts = [f"- {k}: {v}" for k, v in matches.items()]
 
-    return "Ho trovato queste corrispondenze: " + ", ".join(parts)
+    return msg("kb.recall_matches", matches=", ".join(parts))
 
 
 def _action_list(store: dict) -> str:
     if not store:
-        return "La memoria è vuota, non ho ancora salvato nulla."
+        return msg("kb.empty")
     keys = ", ".join(store.keys())
 
-    return f"Informazioni memorizzate: {keys}"
+    return msg("kb.list", keys=keys)
 
 
 def _action_delete(store: dict, key: str) -> str:
     if not key:
-        return "Errore: specifica quale informazione vuoi eliminare."
+        return msg("kb.delete_missing_key")
     if key not in store:
-        return f"'{key}' non è presente in memoria."
+        return msg("kb.delete_not_found", key=key)
     del store[key]
     _save_store(store)
     audit_logger.info("tool=knowledge_base action=delete key=%s", key)
 
-    return f"Ho eliminato '{key}' dalla memoria."
+    return msg("kb.deleted", key=key)
 
 
 _ACTION_MAP = {
@@ -203,7 +204,7 @@ def handler(args: dict) -> str:
 
     action_fn = _ACTION_MAP.get(action)
     if action_fn is None:
-        return f"Azione '{action}' non riconosciuta. Usa: save, recall, list, delete."
+        return msg("kb.invalid_action", action=action)
 
     with _state.lock:
         if action == "save":

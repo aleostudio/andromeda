@@ -4,6 +4,7 @@
 import asyncio
 import logging
 import platform
+from andromeda.messages import msg
 
 logger = logging.getLogger("[ TOOL SYSTEM CONTROL ]")
 audit_logger = logging.getLogger("[ TOOL AUDIT ]")
@@ -11,11 +12,11 @@ audit_logger = logging.getLogger("[ TOOL AUDIT ]")
 
 # Constants
 _PLATFORM = platform.system()
-_VOLUME_INCREASED = "Volume alzato"
-_VOLUME_DECREASED = "Volume abbassato"
-_VOLUME_TOGGLE = "Audio mutato o smutato"
-_BRIGHTNESS_INCREASED = "Luminosità aumentata"
-_BRIGHTNESS_DECREASED = "Luminosità diminuita"
+_VOLUME_INCREASED = "system.volume_up"
+_VOLUME_DECREASED = "system.volume_down"
+_VOLUME_TOGGLE = "system.volume_toggle"
+_BRIGHTNESS_INCREASED = "system.brightness_up"
+_BRIGHTNESS_DECREASED = "system.brightness_down"
 _DEFAULT_SINK = "@DEFAULT_SINK@"
 
 
@@ -181,28 +182,28 @@ def _extract_volume_percent(raw: str) -> str:
 
 def _missing_tool_hint() -> str:
     tool_hint = {
-        "Darwin": "osascript (incluso in macOS)",
-        "Linux": "pactl (PulseAudio) e brightnessctl",
-        "Windows": "nircmd (nirsoft.net)",
+        "Darwin": msg("system.tool_hint_darwin"),
+        "Linux": msg("system.tool_hint_linux"),
+        "Windows": msg("system.tool_hint_windows"),
     }
 
-    return tool_hint.get(_PLATFORM, "gli strumenti di sistema")
+    return tool_hint.get(_PLATFORM, msg("system.tool_hint_default"))
 
 
 async def handler(args: dict) -> str:
     action = args.get("action", "")
 
     if not _ACTIONS:
-        return f"Controllo di sistema non supportato su questa piattaforma ({_PLATFORM})."
+        return msg("system.unsupported_platform", platform=_PLATFORM)
 
     action_info = _ACTIONS.get(action)
     if not action_info:
         available = ", ".join(_ACTIONS.keys())
-        return f"Azione '{action}' non riconosciuta. Azioni disponibili: {available}"
+        return msg("system.unknown_action", action=action, available=available)
 
     cmd = action_info.get("cmd")
     if cmd is None:
-        return "Questa azione non è disponibile sulla piattaforma corrente."
+        return msg("system.action_unavailable")
 
     try:
         code, out, err = await _run_cmd(cmd, action)
@@ -210,22 +211,22 @@ async def handler(args: dict) -> str:
         if code != 0:
             logger.error("System control command failed: %s", err)
             audit_logger.info("tool=system_control action=%s result=error", action)
-            return f"Errore nell'esecuzione del comando: {err}"
+            return msg("system.command_error", error=err)
 
         response = action_info.get("response")
         if response is not None:
             audit_logger.info("tool=system_control action=%s result=ok", action)
-            return response
+            return msg(response)
 
         value = _extract_volume_percent(out)
         audit_logger.info("tool=system_control action=%s result=ok", action)
 
-        return f"Il volume attuale è al {value} percento."
+        return msg("system.current_volume", value=value)
 
     except FileNotFoundError:
         audit_logger.info("tool=system_control action=%s result=missing_command", action)
-        return f"Comando non trovato. Assicurati di avere installato {_missing_tool_hint()}."
+        return msg("system.command_not_found", hint=_missing_tool_hint())
     except Exception:
         logger.exception("System control failed for action: %s", action)
         audit_logger.info("tool=system_control action=%s result=error", action)
-        return "Errore nel controllo di sistema."
+        return msg("system.generic_error")

@@ -8,6 +8,7 @@ import httpx
 from dataclasses import dataclass, field
 from datetime import datetime
 from bs4 import BeautifulSoup
+from andromeda.messages import msg
 from andromeda.tools.http_client import request_with_retry
 
 logger = logging.getLogger("[ TOOL GET LATEST NEWS ]")
@@ -127,7 +128,7 @@ def _parse_articles(html: str, limit: int) -> list[dict]:
 
 
 async def _fetch_page(url: str) -> str:
-    response = await request_with_retry("GET", url, timeout=_state.timeout_sec)
+    response = await request_with_retry("GET", url, timeout_sec=_state.timeout_sec)
 
     return response.text
 
@@ -156,11 +157,11 @@ async def handler(args: dict) -> str:
         articles = _parse_articles(html, limit)
 
         if not articles:
-            return f"Nessuna notizia trovata per la categoria '{category}' su Il Post."
+            return msg("news.none_found", category=category)
 
         now = datetime.now().strftime("%d/%m/%Y %H:%M")
 
-        news = f"Ultime notizie Il Post - {category.upper()} (aggiornate al {now}): "
+        news = msg("news.output_header", category=category.upper(), now=now)
         for i, art in enumerate(articles, 1):
             news = news + str(i) + ": " + art['title'] + ". "
 
@@ -174,13 +175,13 @@ async def handler(args: dict) -> str:
 
     except httpx.HTTPStatusError as e:
         logger.error("Il Post HTTP error: %s", e)
-        return f"Errore nel recupero delle notizie: HTTP {e.response.status_code}"
+        return msg("news.http_error", status=e.response.status_code)
     except httpx.RequestError as e:
         logger.error("Il Post request error: %s", e)
-        return f"Errore di connessione a Il Post: {e}"
+        return msg("news.connection_error", error=e)
     except RuntimeError:
         logger.error("Il Post circuit breaker open")
-        return "Il servizio notizie è temporaneamente non disponibile. Riprova tra poco."
+        return msg("news.unavailable")
     except Exception as e:
         logger.error("Il Post unexpected error: %s", e)
-        return f"Errore imprevisto nel recupero delle notizie: {e}"
+        return msg("news.generic_error", error=e)

@@ -5,6 +5,7 @@ import asyncio
 import logging
 import time
 from dataclasses import dataclass, field
+from andromeda.messages import msg
 
 logger = logging.getLogger("[ TOOL SET TIMER ]")
 audit_logger = logging.getLogger("[ TOOL AUDIT ]")
@@ -78,14 +79,14 @@ def handler(args: dict) -> str:
     try:
         seconds = int(args.get("seconds", 0))
     except (TypeError, ValueError):
-        return "Errore: la durata deve essere un numero intero di secondi."
+        return msg("timer.invalid_seconds")
     label = str(args.get("label", "timer"))
 
     if seconds <= 0:
-        return "Errore: la durata deve essere maggiore di zero."
+        return msg("timer.non_positive")
 
     if seconds > _state.max_sec:
-        return f"Errore: la durata massima è {_state.max_sec} secondi ({_state.max_sec // 60} minuti)."
+        return msg("timer.max_exceeded", max_sec=_state.max_sec, max_min=_state.max_sec // 60)
 
     timer_id = f"{label}_{time.monotonic_ns()}"
     task = asyncio.get_running_loop().create_task(_timer_task(timer_id, seconds, label))
@@ -96,10 +97,10 @@ def handler(args: dict) -> str:
         minutes = seconds // 60
         remaining = seconds % 60
         if remaining:
-            duration_str = f"{minutes} minuti e {remaining} secondi"
+            duration_str = msg("timer.duration_minutes_seconds", minutes=minutes, seconds=remaining)
         else:
-            duration_str = f"{minutes} minuti"
+            duration_str = msg("timer.duration_minutes", minutes=minutes)
     else:
-        duration_str = f"{seconds} secondi"
+        duration_str = msg("timer.duration_seconds", seconds=seconds)
 
-    return f"Timer '{label}' impostato per {duration_str}."
+    return msg("timer.set", label=label, duration=duration_str)

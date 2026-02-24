@@ -6,7 +6,7 @@ import logging
 import re
 import threading
 from collections.abc import Callable
-from andromeda.messages import GENERIC_ERROR_RETRY
+from andromeda.messages import msg
 
 logger = logging.getLogger("[ INTENT ]")
 
@@ -56,4 +56,4 @@ async def _run_handler(handler: Callable, args: dict) -> str:
     except Exception:
         logger.exception("Fast intent handler failed")
 
-        return GENERIC_ERROR_RETRY
+        return msg("core.generic_error_retry")

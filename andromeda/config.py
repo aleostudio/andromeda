@@ -131,7 +131,7 @@ class TTSConfig:
     kokoro_speed: float = 1.0
     speaker_id: int = 0
     length_scale: float = 1.0
-    sentence_silence: float = 0.5
+    sentence_silence: float = 0.3
     prewarm_cache: bool = True
 
 

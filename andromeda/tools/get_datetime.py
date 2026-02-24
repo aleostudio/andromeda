@@ -3,12 +3,9 @@
 
 import logging
 from datetime import datetime
+from andromeda.messages import get_localized_datetime, msg
 
 logger = logging.getLogger("[ TOOL GET DATETIME ]")
-
-# Italian day/month names to avoid thread-unsafe locale.setlocale()
-_DAYS_IT = ["lunedì", "martedì", "mercoledì", "giovedì", "venerdì", "sabato", "domenica"]
-_MONTHS_IT = ["", "gennaio", "febbraio", "marzo", "aprile", "maggio", "giugno", "luglio", "agosto", "settembre", "ottobre", "novembre", "dicembre"]
 
 
 DEFINITION = {
@@ -31,7 +28,6 @@ DEFINITION = {
 
 def handler(_args: dict) -> str:
     now = datetime.now()
-    day_name = _DAYS_IT[now.weekday()]
-    month_name = _MONTHS_IT[now.month]
+    date_text, time_text = get_localized_datetime(now)
 
-    return f"Data: {day_name} {now.day} {month_name} {now.year}, Ora: {now.strftime('%H:%M')}"
+    return msg("datetime.output", date=date_text, time=time_text)

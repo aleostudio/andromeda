@@ -12,6 +12,7 @@ import sounddevice as sd
 import torch
 from collections.abc import Callable
 from andromeda.config import AudioConfig, TTSConfig
+from andromeda.messages import msg
 
 # Ignore Kokoro warnings from torch
 import warnings
@@ -120,9 +121,9 @@ class TextToSpeech:
     # Pre-warm the TTS cache with commonly used phrases
     def prewarm_cache(self, phrases: list[str] | None = None) -> None:
         default_phrases = [
-            "Non ho sentito nulla. Riprova.",
-            "Non ho capito. Puoi ripetere?",
-            "Si è verificato un errore. Riprova.",
+            msg("core.no_speech_retry"),
+            msg("core.not_understood_retry"),
+            msg("core.generic_error_retry"),
         ]
         for text in (phrases or default_phrases):
             key = self._cache_key(text)

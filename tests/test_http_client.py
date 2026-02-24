@@ -1,13 +1,15 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
+import asyncio
 import httpx
 import pytest
 from andromeda.tools import http_client
 
 
 class OkClient:
-    async def request(self, method, url, params=None, timeout=None):
+    async def request(self, method, url, params=None, _timeout=None):
+        await asyncio.sleep(0)
         return httpx.Response(
             200,
             request=httpx.Request(method, url, params=params),
@@ -19,7 +21,8 @@ class FlakyClient:
     def __init__(self):
         self.calls = 0
 
-    async def request(self, method, url, params=None, timeout=None):
+    async def request(self, method, url, params=None, _timeout=None):
+        await asyncio.sleep(0)
         self.calls += 1
         if self.calls == 1:
             raise httpx.TimeoutException("timeout")
@@ -31,7 +34,8 @@ class FlakyClient:
 
 
 class FailingClient:
-    async def request(self, method, url, params=None, timeout=None):
+    async def request(self, method, url, params=None, _timeout=None):
+        await asyncio.sleep(0)
         raise httpx.ConnectError("connect", request=httpx.Request(method, url))
 
 

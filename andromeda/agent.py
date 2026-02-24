@@ -11,8 +11,7 @@ import time
 import httpx
 from collections.abc import Callable
 from andromeda.config import AgentConfig, ConversationConfig
-from andromeda.messages import (GENERIC_ERROR_RETRY, OLLAMA_TIMEOUT,
-                                OLLAMA_UNREACHABLE, REQUEST_TOO_COMPLEX)
+from andromeda.messages import msg
 
 logger = logging.getLogger("[ AGENT ]")
 
@@ -178,13 +177,13 @@ class AIAgent:
 
         except httpx.ConnectError:
             logger.error("Cannot connect to Ollama at %s. Is it running?", self._cfg.base_url)
-            return OLLAMA_UNREACHABLE
+            return msg("agent.ollama_unreachable")
         except httpx.TimeoutException:
             logger.error("Ollama request timed out")
-            return OLLAMA_TIMEOUT
+            return msg("agent.ollama_timeout")
         except Exception:
             logger.exception("Agent processing failed")
-            return GENERIC_ERROR_RETRY
+            return msg("core.generic_error_retry")
 
 
     # Streaming version: push sentences to queue as they are generated
@@ -212,19 +211,19 @@ class AIAgent:
 
         except httpx.ConnectError:
             logger.error("Cannot connect to Ollama at %s. Is it running?", self._cfg.base_url)
-            msg = OLLAMA_UNREACHABLE
-            await self._queue_put(sentence_queue, msg)
-            return msg
+            error_text = msg("agent.ollama_unreachable")
+            await self._queue_put(sentence_queue, error_text)
+            return error_text
         except httpx.TimeoutException:
             logger.error("Ollama request timed out")
-            msg = OLLAMA_TIMEOUT
-            await self._queue_put(sentence_queue, msg)
-            return msg
+            error_text = msg("agent.ollama_timeout")
+            await self._queue_put(sentence_queue, error_text)
+            return error_text
         except Exception:
             logger.exception("Agent processing failed")
-            msg = GENERIC_ERROR_RETRY
-            await self._queue_put(sentence_queue, msg)
-            return msg
+            error_text = msg("core.generic_error_retry")
+            await self._queue_put(sentence_queue, error_text)
+            return error_text
         finally:
             # Signal end of stream
             try:
@@ -420,7 +419,7 @@ class AIAgent:
                 result = await self._execute_tool_call(tool_call)
                 messages.append({"role": "tool", "content": result})
 
-        return REQUEST_TOO_COMPLEX
+        return msg("agent.request_too_complex")
 
 
     # Send a single chat request to Ollama (non-streaming)

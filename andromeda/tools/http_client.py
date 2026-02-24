@@ -4,6 +4,7 @@
 import logging
 import asyncio
 import time
+from dataclasses import dataclass
 from urllib.parse import urlparse
 import httpx
 
@@ -72,12 +73,82 @@ def _is_retryable_status(status_code: int) -> bool:
     return status_code == 429 or status_code >= 500
 
 
+def _build_http_error(response: httpx.Response) -> httpx.HTTPStatusError:
+    return httpx.HTTPStatusError(
+        f"HTTP {response.status_code}",
+        request=response.request,
+        response=response,
+    )
+
+
+async def _request_once(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    params: dict | None = None,
+    timeout_sec: float | None = None,
+) -> httpx.Response:
+    try:
+        if timeout_sec is None:
+            return await client.request(method, url, params=params)
+        async with asyncio.timeout(timeout_sec):
+            return await client.request(method, url, params=params)
+    except TimeoutError as e:
+        raise httpx.TimeoutException("Request timeout") from e
+
+
+def _classify_http_error(error: httpx.HTTPStatusError) -> tuple[bool, bool]:
+    retryable = _is_retryable_status(error.response.status_code)
+
+    return retryable, not retryable
+
+
+@dataclass
+class _AttemptResult:
+    response: httpx.Response | None = None
+    error: Exception | None = None
+    should_retry: bool = False
+    should_mark_failure: bool = False
+
+
+async def _attempt_request(
+    client: httpx.AsyncClient,
+    method: str,
+    url: str,
+    *,
+    params: dict | None = None,
+    timeout_sec: float | None = None,
+) -> _AttemptResult:
+    try:
+        response = await _request_once(
+            client,
+            method,
+            url,
+            params=params,
+            timeout_sec=timeout_sec,
+        )
+        if response.status_code >= 400:
+            raise _build_http_error(response)
+
+        return _AttemptResult(response=response)
+
+    except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+        return _AttemptResult(error=e, should_retry=True, should_mark_failure=True)
+    except httpx.HTTPStatusError as e:
+        _should_retry, should_raise = _classify_http_error(e)
+        if should_raise:
+            return _AttemptResult(error=e)
+
+        return _AttemptResult(error=e, should_retry=True, should_mark_failure=True)
+
+
 async def request_with_retry(
     method: str,
     url: str,
     *,
     params: dict | None = None,
-    timeout: float | None = None,
+    timeout_sec: float | None = None,
     retries: int = 2,
     backoff_sec: float = 0.25,
 ) -> httpx.Response:
@@ -86,42 +157,30 @@ async def request_with_retry(
         raise RuntimeError("Circuit open")
 
     client = get_client()
-    last_error: Exception | None = None
+    attempts = retries + 1
 
-    for attempt in range(retries + 1):
-        try:
-            response = await client.request(method, url, params=params, timeout=timeout)
-            if response.status_code >= 400:
-                error = httpx.HTTPStatusError(
-                    f"HTTP {response.status_code}",
-                    request=response.request,
-                    response=response,
-                )
-                if _is_retryable_status(response.status_code):
-                    raise error
-                _mark_success(key)
-                raise error
-
+    for attempt in range(attempts):
+        result = await _attempt_request(
+            client,
+            method,
+            url,
+            params=params,
+            timeout_sec=timeout_sec,
+        )
+        if result.response is not None:
             _mark_success(key)
-            return response
+            return result.response
 
-        except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
-            last_error = e
+        if result.should_mark_failure:
             _mark_failure(key)
-        except httpx.HTTPStatusError as e:
-            last_error = e
-            if _is_retryable_status(e.response.status_code):
-                _mark_failure(key)
-            else:
-                raise
 
-        if attempt < retries:
+        if not result.should_retry:
+            raise result.error or RuntimeError("HTTP request failed")
+
+        if attempt < attempts - 1:
             await asyncio.sleep(backoff_sec * (2 ** attempt))
 
-    if last_error:
-        raise last_error
-
-    raise RuntimeError("HTTP request failed")
+    raise result.error or RuntimeError("HTTP request failed")
 
 
 # Close the shared HTTP client (call on shutdown)

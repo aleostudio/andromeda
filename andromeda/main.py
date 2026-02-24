@@ -17,8 +17,7 @@ from andromeda.config import AppConfig
 from andromeda.feedback import AudioFeedback
 from andromeda.health import HealthCheckServer
 from andromeda.intent import match_and_execute
-from andromeda.messages import (GENERIC_ERROR_RETRY, NO_SPEECH_RETRY,
-                                NOT_UNDERSTOOD_RETRY, PROCESSING_ERROR_RETRY)
+from andromeda.messages import msg, set_locale
 from andromeda.metrics import PerformanceMetrics
 from andromeda.state_machine import AssistantState, StateMachine
 from andromeda.stt import SpeechRecognizer
@@ -67,6 +66,7 @@ class VoiceAssistant:
 
     # Initialize all components. Call before run().
     def initialize(self) -> None:
+        set_locale(self._cfg.stt.language)
         logger.info(".-------------------------------------------------------------.")
         logger.info("|                     _                              _        |")
         logger.info("|     /\\             | |                            | |       |")
@@ -224,7 +224,7 @@ class VoiceAssistant:
         min_samples = int(self._cfg.vad.min_recording_sec * self._cfg.audio.sample_rate)
         if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
             logger.info("Recording too short or no speech detected, asking user to retry")
-            await self._speak_error(NO_SPEECH_RETRY)
+            await self._speak_error(msg("core.no_speech_retry"))
             return AssistantState.IDLE
 
         self._feedback.play("done")
@@ -276,7 +276,7 @@ class VoiceAssistant:
 
         if not text.strip():
             logger.info("Empty transcription, asking user to repeat")
-            await self._speak_error(NOT_UNDERSTOOD_RETRY)
+            await self._speak_error(msg("core.not_understood_retry"))
             return AssistantState.SPEAKING
 
         logger.info("User said: %s", text)
@@ -310,8 +310,8 @@ class VoiceAssistant:
                     await self._process_standard(text)
         except Exception:
             logger.exception("LLM processing failed")
-            await self._speak_error(GENERIC_ERROR_RETRY)
-            self._response_text = GENERIC_ERROR_RETRY
+            await self._speak_error(msg("core.generic_error_retry"))
+            self._response_text = msg("core.generic_error_retry")
         finally:
             self._feedback.stop()
             self._audio.unmute()
@@ -413,7 +413,7 @@ class VoiceAssistant:
     # ERROR: Speak error message and return to IDLE
     async def _handle_error(self, _state: AssistantState) -> AssistantState:
         try:
-            await self._speak_error(PROCESSING_ERROR_RETRY)
+            await self._speak_error(msg("core.processing_error_retry"))
         except Exception:
             logger.exception("Failed to speak error message")
 

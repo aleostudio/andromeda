@@ -9,6 +9,7 @@ import httpx
 from dataclasses import dataclass, field
 from urllib.parse import parse_qs, unquote, urlparse
 from bs4 import BeautifulSoup
+from andromeda.messages import msg
 from andromeda.tools.http_client import request_with_retry
 
 logger = logging.getLogger("[ TOOL WEB SEARCH ]")
@@ -22,7 +23,6 @@ _CONNECTIVITY_PROBES: tuple[tuple[str, str], ...] = (
     ("HEAD", "https://html.duckduckgo.com/html/"),
     ("GET", "https://www.gstatic.com/generate_204"),
 )
-_OFFLINE_MSG = "Non conosco la risposta e al momento non posso cercare online. Riprova quando sarà disponibile una connessione."
 _INJECTION_PATTERNS = (
     re.compile(r"ignore\s+(all|any|the)\s+(previous|prior)\s+instructions?", re.IGNORECASE),
     re.compile(r"system\s+prompt", re.IGNORECASE),
@@ -149,7 +149,7 @@ async def _fetch_and_extract(url: str) -> str:
         return ""
 
     try:
-        resp = await request_with_retry("GET", url, timeout=_state.timeout_sec)
+        resp = await request_with_retry("GET", url, timeout_sec=_state.timeout_sec)
     except Exception:
         logger.debug("Failed to fetch page content from %s", url)
         return ""
@@ -191,7 +191,7 @@ async def _check_connectivity() -> bool:
     online = False
     for method, url in _CONNECTIVITY_PROBES:
         try:
-            resp = await request_with_retry(method, url, timeout=_CONNECTIVITY_TIMEOUT_SEC, retries=0)
+            resp = await request_with_retry(method, url, timeout_sec=_CONNECTIVITY_TIMEOUT_SEC, retries=0)
             if resp.status_code < 500:
                 online = True
                 break
@@ -211,11 +211,11 @@ async def _handle_search(query: str) -> str:
             "GET",
             "https://html.duckduckgo.com/html/",
             params={"q": query},
-            timeout=_state.timeout_sec,
+            timeout_sec=_state.timeout_sec,
         )
         results = _parse_search_results(search_resp.text, _state.max_results)
         if not results:
-            return ("Non ho trovato risultati utili per questa ricerca. Non so rispondere.")
+            return msg("web.no_results")
 
         # Optionally fetch full page content of top result
         if _state.fetch_page_content:
@@ -224,55 +224,55 @@ async def _handle_search(query: str) -> str:
                 results[0]["content"] = page_text[:_state.max_content_chars]
 
         # Format output with URLs so LLM can follow up
-        output = f"Risultati della ricerca web per '{query}': "
+        output = msg("web.search_output", query=query)
 
         for i, r in enumerate(results, 1):
             output += f"{i}. {r['title']} ({r['url']}): {r['snippet']} "
             if r.get("content"):
-                output += f"Contenuto pagina: {r['content']} "
+                output += msg("web.page_content", content=r["content"]) + " "
 
         return output
 
     except httpx.ConnectError:
         logger.error("Cannot connect to DuckDuckGo")
-        return _OFFLINE_MSG
+        return msg("web.offline")
     except httpx.TimeoutException:
         logger.error("DuckDuckGo request timed out")
-        return "La ricerca web ha impiegato troppo tempo."
+        return msg("web.timeout")
     except RuntimeError:
         logger.error("Web search circuit breaker open")
-        return "La ricerca web è temporaneamente non disponibile. Riprova tra poco."
+        return msg("web.unavailable")
     except Exception:
         logger.exception("Web search failed")
-        return "Errore nella ricerca web. Non so rispondere."
+        return msg("web.generic_error")
 
 
 # Fetch a specific URL and return its text content
 async def _handle_fetch(url: str) -> str:
     if not _is_allowed_url(url):
-        return "L'URL richiesto non è consentito per ragioni di sicurezza."
+        return msg("web.url_not_allowed")
 
     try:
         page_text = await _fetch_and_extract(url)
 
         if not page_text:
-            return f"Non sono riuscito a estrarre contenuto dalla pagina {url}."
+            return msg("web.page_extract_failed", url=url)
 
         truncated = page_text[:_state.max_content_chars]
-        return f"Contenuto della pagina {url}: {truncated}"
+        return msg("web.page_content_output", url=url, content=truncated)
 
     except httpx.ConnectError:
         logger.error("Cannot connect to %s", url)
-        return _OFFLINE_MSG
+        return msg("web.offline")
     except httpx.TimeoutException:
         logger.error("Request to %s timed out", url)
-        return f"La richiesta alla pagina {url} ha impiegato troppo tempo."
+        return msg("web.page_timeout", url=url)
     except RuntimeError:
         logger.error("Page fetch circuit breaker open for %s", url)
-        return "Il recupero pagina è temporaneamente non disponibile. Riprova tra poco."
+        return msg("web.page_unavailable")
     except Exception:
         logger.exception("Page fetch failed for %s", url)
-        return f"Errore nel recupero della pagina {url}. Non so rispondere."
+        return msg("web.page_generic_error", url=url)
 
 
 async def handler(args: dict) -> str:
@@ -280,9 +280,9 @@ async def handler(args: dict) -> str:
     url = args.get("url", "").strip()
 
     if not query and not url:
-        return "Errore: specifica 'query' o 'url'."
+        return msg("web.missing_query_or_url")
     if url and not _is_allowed_url(url):
-        return "L'URL richiesto non è consentito per ragioni di sicurezza."
+        return msg("web.url_not_allowed")
 
     # Build cache key from both params
     cache_key = f"q:{query.lower()}|u:{url.lower()}"
@@ -296,7 +296,7 @@ async def handler(args: dict) -> str:
     # Verify internet connectivity before attempting
     if not await _check_connectivity():
         logger.info("Web search skipped: device is offline")
-        return _OFFLINE_MSG
+        return msg("web.offline")
 
     # Dispatch based on parameters
     if query and url:
