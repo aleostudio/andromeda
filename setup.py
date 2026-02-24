@@ -2,6 +2,7 @@
 
 import subprocess
 from pathlib import Path
+from huggingface_hub import snapshot_download
 
 ROOT_DIR = Path(__file__).parent
 VENV_DIR = ROOT_DIR / ".venv"
@@ -21,16 +22,28 @@ def python_bin() -> str:
 
 # Main script
 def main() -> None:
-    # Folders creation
+    _create_folders()
+    _create_venv()
+    _install_deps()
+    _download_wake_word_model()
+    _download_piper_model()
+    _download_kokoro_model()
+    _download_whisper_model()
+    _print_instructions()
+
+
+def _create_folders() -> None:
     print("")
     print("[*] Creating directories...")
     (ROOT_DIR / "models").mkdir(exist_ok=True)
     (ROOT_DIR / "models" / "openwakeword").mkdir(exist_ok=True)
     (ROOT_DIR / "models" / "piper").mkdir(exist_ok=True)
+    (ROOT_DIR / "models" / "kokoro").mkdir(exist_ok=True)
     (ROOT_DIR / "sounds").mkdir(exist_ok=True)
     print("    Directories created")
 
-    # Virtual env creation
+
+def _create_venv() -> None:
     print("")
     print("[*] Creating virtual environment (python 3.11) with uv...")
     if not VENV_DIR.exists():
@@ -39,13 +52,26 @@ def main() -> None:
     else:
         print("    .venv already exists")
 
-    # Dependencies
+
+def _install_deps() -> None:
     print("")
     print("[*] Installing dependencies with uv sync...")
     run(f"{UV} sync --all-extras")
     print("    Dependencies installed")
 
-    # Wake word model (openWakeWord)
+
+def _download_wake_word_model() -> None:
+    print("")
+    print("[*] Downloading OpenWakeWord base models...")
+    result = run(
+        f'{python_bin()} -c "import openwakeword; openwakeword.utils.download_models()"',
+        check=False,
+    )
+    if result.returncode == 0:
+        print("    OpenWakeWord base models ready")
+    else:
+        print("    OpenWakeWord base models will download on first run")
+
     print("")
     print("[*] Downloading wake word 'Andromeda'...")
     models_dir = ROOT_DIR / "models" / "openwakeword"
@@ -57,7 +83,8 @@ def main() -> None:
     else:
         print("    OpenWakeWord model 'Andromeda' already present")
 
-    # Italian voice download (Piper)
+
+def _download_piper_model() -> None:
     print("")
     print("[*] Downloading Piper Italian voice models (TTS)...")
     models_dir = ROOT_DIR / "models" / "piper"
@@ -82,7 +109,29 @@ def main() -> None:
     else:
         print("    Piper voice 'Paola' already present")
 
-    # Whisper model download
+
+def _download_kokoro_model() -> None:
+    # Kokoro TTS model download (HF cache in project)
+    print("")
+    print("[*] Downloading Kokoro TTS model (project HF cache)...")
+    models_dir = ROOT_DIR / "models" / "kokoro"
+    models_dir.mkdir(exist_ok=True)
+    result = run(
+        f'{python_bin()} -c "import os; '
+        f"os.environ['HF_HOME']='{models_dir}'; "
+        f"from huggingface_hub import snapshot_download; "
+        f"snapshot_download(repo_id='hexgrad/Kokoro-82M')\"",
+        check=False,
+    )
+
+    if result.returncode == 0:
+        print("    Kokoro model ready (cached)")
+    else:
+        print("    Kokoro model will download on first run")
+        print(result.stderr[:200])
+
+
+def _download_whisper_model() -> None:
     print("")
     print("[*] Downloading Whisper model medium and large-v3 (STT)...")
     print("    This will download ~3GB on first run")
@@ -109,18 +158,8 @@ def main() -> None:
         print("    Whisper model large-v3 will download on first run")
         print(f"{result.stderr[:200]}")
 
-    # OpenWakeWord model
-    print("")
-    print("[*] Downloading OpenWakeWord base models...")
-    result = run(
-        f'{python_bin()} -c "import openwakeword; openwakeword.utils.download_models()"',
-        check=False,
-    )
-    if result.returncode == 0:
-        print("    OpenWakeWord models ready")
-    else:
-        print("    OpenWakeWord models will download on first run")
 
+def _print_instructions() -> None:
     print("")
     print("    To create a custom wake word (e.g. 'ehi computer'):")
     print("    Option A - Use OpenWakeWord's training notebook:")
@@ -128,17 +167,10 @@ def main() -> None:
     print("    2. Follow 'Training Custom Models' guide")
     print("    3. Place the .onnx file in models/ehi_computer.onnx")
     print("")
-    print("    Option B - Use Picovoice Porcupine (alternative):")
-    print("    1. Create account at https://console.picovoice.ai")
-    print("    2. Train custom keyword")
-    print("    3. Download .ppn file and update config.yaml")
-    print("")
-    print("    For now, the assistant will use the built-in 'hey_jarvis' keyword.")
+    print("    Current available wake words: 'andromeda', 'jarvis' (built-in)")
     print("")
     print("[*] Setup complete!")
     print("")
-
-    # Instructions
     print("To run the assistant:")
     print("uv run python -m andromeda.main")
     print("")

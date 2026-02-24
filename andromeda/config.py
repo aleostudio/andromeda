@@ -123,8 +123,12 @@ class AgentConfig:
 @dataclass(frozen=True)
 class TTSConfig:
     engine: str = "piper"
-    model_path: str = "models/piper/it_IT-paola-medium.onnx"
-    model_config: str = "models/piper/it_IT-paola-medium.onnx.json"
+    piper_model_path: str = "models/piper/it_IT-paola-medium.onnx"
+    piper_model_config: str = "models/piper/it_IT-paola-medium.onnx.json"
+    kokoro_repo_id: str = "hexgrad/Kokoro-82M"
+    kokoro_lang_code: str = "i"
+    kokoro_voice: str = "if_sara"
+    kokoro_speed: float = 1.0
     speaker_id: int = 0
     length_scale: float = 1.0
     sentence_silence: float = 0.5

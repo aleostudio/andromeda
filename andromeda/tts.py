@@ -9,8 +9,14 @@ import threading
 import wave
 import numpy as np
 import sounddevice as sd
+import torch
 from collections.abc import Callable
 from andromeda.config import AudioConfig, TTSConfig
+
+# Ignore Kokoro warnings from torch
+import warnings
+warnings.filterwarnings("ignore", message=r".*dropout option adds dropout.*num_layers=1.*", category=UserWarning, module=r"torch\..*")
+warnings.filterwarnings("ignore", message=r".*torch\.nn\.utils\.weight_norm.*deprecated.*", category=FutureWarning, module=r"torch\..*")
 
 logger = logging.getLogger("[ TTS ]")
 
@@ -35,6 +41,16 @@ class TextToSpeech:
         self._syn_config = None
         self._on_first_audio: Callable[[], None] | None = None
 
+        # Selected synthesis function
+        self._synthesize_fn: Callable[[str], tuple[np.ndarray, int]] | None = None
+
+        # Kokoro objects (loaded only when engine == "kokoro")
+        self._kokoro_pipeline = None
+        self._kokoro_voice = None
+        self._kokoro_speed = 1.0
+        self._kokoro_repo_id = None
+        self._kokoro_lang_code = None
+
         # TTS audio cache: maps normalized text -> (audio_array, sample_rate)
         self._cache: dict[str, tuple[np.ndarray, int]] = {}
         self._cache_order: collections.deque[str] = collections.deque()  # LRU tracking
@@ -48,23 +64,57 @@ class TextToSpeech:
 
     # Load Piper voice model
     def initialize(self) -> None:
-        try:
-            from piper import PiperVoice
-            from piper.config import SynthesisConfig
+        engine = self._tts_cfg.engine
 
-            self._voice = PiperVoice.load(self._tts_cfg.model_path, config_path=self._tts_cfg.model_config)
-            self._syn_config = SynthesisConfig(
-                speaker_id=self._tts_cfg.speaker_id or None,
-                length_scale=self._tts_cfg.length_scale or None,
-            )
-            logger.info("Piper TTS loaded: %s (length_scale=%.2f)", self._tts_cfg.model_path, self._tts_cfg.length_scale)
+        match engine:
 
-        except FileNotFoundError:
-            logger.error("Piper model not found at %s", self._tts_cfg.model_path)
-            raise
-        except Exception:
-            logger.exception("Failed to load Piper TTS")
-            raise
+            # Piper TTS
+            case "piper":
+                try:
+                    from piper import PiperVoice
+                    from piper.config import SynthesisConfig
+                    self._voice = PiperVoice.load(self._tts_cfg.piper_model_path, config_path=self._tts_cfg.piper_model_config)
+                    self._syn_config = SynthesisConfig(speaker_id=self._tts_cfg.speaker_id or None, length_scale=self._tts_cfg.length_scale or None)
+                    self._synthesize_fn = self._synthesize_piper
+                    logger.info("Piper TTS loaded: %s (length_scale=%.2f)", self._tts_cfg.piper_model_path, self._tts_cfg.length_scale)
+                except FileNotFoundError:
+                    logger.error("Piper model not found at %s", self._tts_cfg.piper_model_path)
+                    raise
+                except Exception:
+                    logger.exception("Failed to load Piper TTS")
+                    raise
+
+            # Kokoro TTS
+            case "kokoro":
+                try:
+                    import os
+                    import huggingface_hub.constants as hfconst
+                    from kokoro import KPipeline
+                    from pathlib import Path
+                    hfconst.HF_HUB_OFFLINE = True
+
+                    # Force HuggingFace to use project-local cache and offline mode
+                    hf_home = Path(__file__).resolve().parents[1] / "models/kokoro"
+                    os.environ["HF_HUB_CACHE"] = str(hf_home / "hub")
+                    os.environ["HF_XET_CACHE"] = str(hf_home / "xet")
+                    os.environ["HF_HUB_OFFLINE"] = "1"
+                    os.environ["TRANSFORMERS_OFFLINE"] = "1"
+                    os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
+                    os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
+
+                    self._kokoro_lang_code = getattr(self._tts_cfg, "kokoro_lang_code", "i")
+                    self._kokoro_voice = getattr(self._tts_cfg, "kokoro_voice", "if_sara")
+                    self._kokoro_speed = float(getattr(self._tts_cfg, "kokoro_speed", 1.0))
+                    self._kokoro_repo_id = getattr(self._tts_cfg, "kokoro_repo_id", "hexgrad/Kokoro-82M")
+                    self._kokoro_pipeline = KPipeline(lang_code=self._kokoro_lang_code, repo_id=self._kokoro_repo_id)
+                    self._synthesize_fn = self._synthesize_kokoro
+                    logger.info("Kokoro TTS loaded: repo=%s (lang=%s, voice=%s, speed=%.2f)", self._kokoro_repo_id, self._kokoro_lang_code, self._kokoro_voice, self._kokoro_speed)
+                except Exception:
+                    logger.exception("Failed to load Kokoro TTS")
+                    raise
+
+            case _:
+                raise ValueError(f"Failed to load TTS: engine '{engine}' unknown")
 
 
     # Pre-warm the TTS cache with commonly used phrases
@@ -78,7 +128,7 @@ class TextToSpeech:
             key = self._cache_key(text)
             if key not in self._cache:
                 try:
-                    audio, sr = self._synthesize_piper(text)
+                    audio, sr = self._synthesize(text)
                     self._cache_put(key, audio, sr)
                     logger.debug("TTS cache pre-warmed: %s", text[:40])
                 except Exception:
@@ -97,7 +147,7 @@ class TextToSpeech:
         logger.info("TTS speaking: %s", text[:80])
 
         try:
-            await self._speak_piper(text)
+            await self._speak(text)
         except Exception:
             logger.exception("TTS playback failed")
         finally:
@@ -111,7 +161,7 @@ class TextToSpeech:
         self._stop_event.clear()
 
         try:
-            await self._speak_streamed_piper(sentence_queue)
+            await self._speak_streamed_engine(sentence_queue)
         except Exception:
             logger.exception("TTS streamed playback failed")
         finally:
@@ -119,7 +169,7 @@ class TextToSpeech:
 
 
     # Streaming Piper with prefetch: synthesize next sentence while playing current
-    async def _speak_streamed_piper(self, sentence_queue: asyncio.Queue) -> None:
+    async def _speak_streamed_engine(self, sentence_queue: asyncio.Queue) -> None:
         loop = asyncio.get_running_loop()
         stream_opened = False
         prefetch_task: asyncio.Task | None = None
@@ -263,7 +313,7 @@ class TextToSpeech:
             return cached[0].copy(), cached[1]
 
         # Synthesize and cache
-        audio, sr = await loop.run_in_executor(None, self._synthesize_piper, text)
+        audio, sr = await loop.run_in_executor(None, self._synthesize, text)
         self._cache_put(key, audio, sr)
 
         return audio, sr
@@ -281,12 +331,20 @@ class TextToSpeech:
                 pass
 
 
-    # Synthesize with Piper and play through sounddevice (chunk-by-chunk, interruptible)
-    async def _speak_piper(self, text: str) -> None:
+    # Synthesize and play through sounddevice (chunk-by-chunk, interruptible)
+    async def _speak(self, text: str) -> None:
         loop = asyncio.get_running_loop()
         audio, sample_rate = await self._synthesize_cached(loop, text)
         _apply_fade_out(audio)
         await loop.run_in_executor(None, lambda: self._play_chunked(audio, sample_rate))
+
+
+    # Dispatch synthesis to selected engine (blocking, runs in executor)
+    def _synthesize(self, text: str) -> tuple[np.ndarray, int]:
+        if self._synthesize_fn is None:
+            raise RuntimeError("TTS engine not initialized. Call initialize() first.")
+
+        return self._synthesize_fn(text)
 
 
     # Synthesize text to numpy array (blocking, runs in executor)
@@ -308,6 +366,34 @@ class TextToSpeech:
         except Exception:
             logger.exception("Piper synthesis failed for: %s", text[:40])
             # Return silence so caller doesn't crash
+            sr = self._audio_cfg.sample_rate
+
+            return np.zeros(sr // 2, dtype=np.float32), sr
+
+
+    # Synthesize text to numpy array (blocking, runs in executor)
+    def _synthesize_kokoro(self, text: str) -> tuple[np.ndarray, int]:
+        try:
+            generator = self._kokoro_pipeline(text, voice=self._kokoro_voice, speed=self._kokoro_speed)
+            chunks: list[np.ndarray] = []
+            for _i, (_gs, _ps, audio) in enumerate(generator):
+                if isinstance(audio, torch.Tensor):
+                    audio_np = audio.detach().cpu().numpy().astype(np.float32, copy=False)
+                else:
+                    audio_np = np.asarray(audio, dtype=np.float32)
+
+                chunks.append(audio_np.reshape(-1).astype(np.float32, copy=False))
+
+            if not chunks:
+                raise RuntimeError("Kokoro returned empty audio")
+
+            full_audio = np.concatenate(chunks).reshape(-1).astype(np.float32, copy=False)
+            sample_rate = 24000
+
+            return full_audio, sample_rate
+
+        except Exception:
+            logger.exception("Kokoro synthesis failed for: %s", text[:40])
             sr = self._audio_cfg.sample_rate
 
             return np.zeros(sr // 2, dtype=np.float32), sr

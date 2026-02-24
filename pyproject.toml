@@ -5,13 +5,17 @@ description = "Smart home assistant completely offline"
 requires-python = ">=3.11,<3.14"
 dependencies = [
     "sounddevice>=0.5.0",
+    "soundfile>=0.12.1",
     "numpy>=1.26.0",
+    "torch>=2.1.0",
     "webrtcvad>=2.0.10",
     "setuptools<81",
     "noisereduce>=3.0.0",
     "faster-whisper>=1.0.0",
     "openwakeword>=0.6.0",
     "piper-tts>=1.2.0",
+    "kokoro>=0.9.4",
+    "huggingface_hub>=0.20.0",
     "httpx>=0.27.0",
     "beautifulsoup4>=4.12.0",
     "pyyaml>=6.0",

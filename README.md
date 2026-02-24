@@ -1,7 +1,7 @@
 # Andromeda
 
 Smart home assistant completely **offline** using **openWakeWord** for wake word, **Whisper** for STT,
-**Piper** for TTS and **Ollama** for LLM model inference with tool calling.
+**Piper** or **Kokoro** for TTS and **Ollama** for LLM model inference with tool calling.
 
 ## Index
 
@@ -41,7 +41,7 @@ Mic ──▶ Buffer ──▶ Wake Word (OpenWakeWord)
               └───────┬───────┘
                       │
                       ▼
-           TTS (Piper) ──▶ Speaker
+       TTS (Piper / Kokoro) ──▶ Speaker
                       │
               [FOLLOW-UP WAIT]
                       │
@@ -126,6 +126,14 @@ Weather, news, and web search results are **cached with TTL** (5 min, 10 min, 5 
 - [uv](https://docs.astral.sh/uv/getting-started/installation) and [pip](https://pip.pypa.io/en/stable/installation) installed
 - [Ollama](https://ollama.com) with desired model
 
+If you will use italian TTS, also install:
+
+```bash
+brew install espeak-ng
+```
+
+This will help italian models to correctly handle **grapheme → phoneme** (optional if you want english only).
+
 [↑ index](#index)
 
 ---
@@ -152,7 +160,7 @@ Anyway, we suggest you to use:
 make setup
 ```
 
-It will create folders, force deps sync and download models for **OpenWakeWord**, **Whisper** and **Piper**.
+It will create folders, force deps sync and download models for **OpenWakeWord**, **Whisper**, **Piper** and **Kokoro**.
 
 At this point, ensure you have **Ollama model** installed, with:
 
@@ -192,7 +200,12 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `agent` | `max_tokens` | `500` | Maximum response tokens |
 | `agent` | `streaming` | `false` | Stream TTS sentence-by-sentence |
 | `agent` | `prewarm` | `true` | Pre-warm LLM model at startup |
-| `tts` | `model_path` | `models/piper/it_IT-paola-medium.onnx` | Piper voice model |
+| `tts` | `engine` | `piper` | TTS engine to use (piper - kokoro) |
+| `tts` | `piper_model_path` | `models/piper/it_IT-paola-medium.onnx` | Piper voice model, if engine=piper |
+| `tts` | `piper_model_config` | `models/piper/it_IT-paola-medium.onnx.json` | Piper model config, if engine=piper |
+| `tts` | `kokoro_lang_code` | `i` | Kokoro language code, if engine=kokoro |
+| `tts` | `kokoro_voice` | `if_sara` | Kokoro model, if engine=kokoro |
+| `tts` | `kokoro_speed` | `1.0` | Piper voice speed, if engine=kokoro |
 | `tts` | `prewarm_cache` | `true` | Pre-synthesize common error phrases at startup |
 | `conversation` | `follow_up_timeout_sec` | `5.0` | Seconds to wait for follow-up (0 = disabled) |
 | `conversation` | `history_timeout_sec` | `300.0` | Clear history after inactivity (0 = never) |
