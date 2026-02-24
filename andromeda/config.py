@@ -161,6 +161,7 @@ class ToolsConfig:
     knowledge_base_path: str = "data/knowledge.json"
     weather_timeout_sec: float = 10.0
     timer_max_sec: int = 3600
+    allow_system_control: bool = True
     web_search_timeout_sec: float = 10.0
     web_search_max_results: int = 3
     web_search_max_content_chars: int = 2000

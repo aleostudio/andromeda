@@ -13,8 +13,8 @@ _PLATFORM = platform.system()
 _VOLUME_INCREASED = "Volume alzato"
 _VOLUME_DECREASED = "Volume abbassato"
 _VOLUME_TOGGLE = "Audio mutato o smutato"
-_BRIGHTNESS_INCREASED = "Volume alzato"
-_BRIGHTNESS_DECREASED = "Volume abbassato"
+_BRIGHTNESS_INCREASED = "Luminosità aumentata"
+_BRIGHTNESS_DECREASED = "Luminosità diminuita"
 _DEFAULT_SINK = "@DEFAULT_SINK@"
 
 

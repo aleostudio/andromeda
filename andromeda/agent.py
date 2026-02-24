@@ -2,6 +2,7 @@
 # Licensed under MIT
 
 import asyncio
+import contextlib
 import inspect
 import json
 import logging
@@ -33,6 +34,7 @@ _MARKDOWN_BLOCK_RE = re.compile(r'^\s*(?:#{1,6}\s+|[-*+]\s+|\d+\.\s+)', re.MULTI
 # Constants to avoid repeats
 _MODEL_CHAT_PATH = "/api/chat"
 _AGENT_NOT_INITIALIZED_ERR = "Agent not initialized. Call initialize() first."
+_QUEUE_PUT_TIMEOUT_SEC = 1.0
 
 # Conversational AI agent
 class AIAgent:
@@ -209,21 +211,27 @@ class AIAgent:
         except httpx.ConnectError:
             logger.error("Cannot connect to Ollama at %s. Is it running?", self._cfg.base_url)
             msg = "Non riesco a connettermi al modello. Verifica che Ollama sia in esecuzione."
-            await sentence_queue.put(msg)
+            await self._queue_put(sentence_queue, msg)
             return msg
         except httpx.TimeoutException:
             logger.error("Ollama request timed out")
             msg = "La richiesta ha impiegato troppo tempo. Riprova."
-            await sentence_queue.put(msg)
+            await self._queue_put(sentence_queue, msg)
             return msg
         except Exception:
             logger.exception("Agent processing failed")
             msg = "Si è verificato un errore. Riprova."
-            await sentence_queue.put(msg)
+            await self._queue_put(sentence_queue, msg)
             return msg
         finally:
             # Signal end of stream
-            await sentence_queue.put(None)
+            try:
+                sentence_queue.put_nowait(None)
+            except asyncio.QueueFull:
+                with contextlib.suppress(asyncio.QueueEmpty):
+                    sentence_queue.get_nowait()
+                with contextlib.suppress(asyncio.QueueFull):
+                    sentence_queue.put_nowait(None)
 
 
     # Handle tool calling loop, then stream the final text response
@@ -267,7 +275,7 @@ class AIAgent:
         for sentence in sentences:
             stripped = AIAgent._strip_markdown(sentence)
             if stripped:
-                await queue.put(stripped)
+                await AIAgent._queue_put(queue, stripped)
 
 
     # Stream response from Ollama, splitting into clauses and pushing to queue
@@ -354,7 +362,7 @@ class AIAgent:
             stripped = AIAgent._strip_markdown(part)
             if stripped:
                 logger.debug("Streaming %s: %s", label, stripped)
-                await queue.put(stripped)
+                await AIAgent._queue_put(queue, stripped)
 
 
     # Try to split buffer at clause boundaries; return remainder or original buffer
@@ -367,7 +375,7 @@ class AIAgent:
             return buffer
 
         logger.debug("Streaming clause: %s", first_clause)
-        await queue.put(first_clause)
+        await AIAgent._queue_put(queue, first_clause)
 
         remainder = _CLAUSE_RE.split(buffer, maxsplit=1)
 
@@ -380,7 +388,15 @@ class AIAgent:
         remainder = AIAgent._strip_markdown(buffer)
         if remainder:
             logger.debug("Streaming final: %s", remainder)
-            await queue.put(remainder)
+            await AIAgent._queue_put(queue, remainder)
+
+
+    @staticmethod
+    async def _queue_put(queue: asyncio.Queue, value: str) -> None:
+        try:
+            await asyncio.wait_for(queue.put(value), timeout=_QUEUE_PUT_TIMEOUT_SEC)
+        except asyncio.TimeoutError:
+            logger.warning("Streaming queue is full, dropping chunk")
 
 
     # Run completion loop, handling tool calls until we get a text response

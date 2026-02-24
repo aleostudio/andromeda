@@ -2,6 +2,7 @@
 # Licensed under MIT
 
 import logging
+import re
 import time
 import httpx
 from urllib.parse import parse_qs, unquote, urlparse
@@ -25,7 +26,18 @@ _CACHE_MAX_SIZE: int = 100
 _connectivity_cache: tuple[bool, float] = (False, 0.0)
 _CONNECTIVITY_TTL_SEC: float = 30.0  # re-check every 30s
 _CONNECTIVITY_TIMEOUT_SEC: float = 3.0
+_CONNECTIVITY_PROBES: tuple[tuple[str, str], ...] = (
+    ("HEAD", "https://html.duckduckgo.com/html/"),
+    ("GET", "https://www.gstatic.com/generate_204"),
+)
 _OFFLINE_MSG = "Non conosco la risposta e al momento non posso cercare online. Riprova quando sarà disponibile una connessione."
+_INJECTION_PATTERNS = (
+    re.compile(r"ignore\s+(all|any|the)\s+(previous|prior)\s+instructions?", re.IGNORECASE),
+    re.compile(r"system\s+prompt", re.IGNORECASE),
+    re.compile(r"developer\s+message", re.IGNORECASE),
+    re.compile(r"jailbreak", re.IGNORECASE),
+    re.compile(r"act\s+as\s+", re.IGNORECASE),
+)
 
 
 DEFINITION = {
@@ -129,7 +141,17 @@ async def _fetch_and_extract(url: str) -> str:
     if not main:
         return ""
 
-    return main.get_text(separator=" ", strip=True)
+    return _sanitize_content(main.get_text(separator=" ", strip=True))
+
+
+def _sanitize_content(text: str) -> str:
+    if not text:
+        return ""
+    cleaned = text
+    for pattern in _INJECTION_PATTERNS:
+        cleaned = pattern.sub(" ", cleaned)
+
+    return " ".join(cleaned.split())
 
 
 # Quick connectivity probe with caching
@@ -139,12 +161,19 @@ async def _check_connectivity() -> bool:
     if (time.monotonic() - checked_at) < _CONNECTIVITY_TTL_SEC:
         return is_online
 
-    try:
-        client = get_client()
-        resp = await client.head("https://1.1.1.1", timeout=_CONNECTIVITY_TIMEOUT_SEC)
-        online = resp.status_code < 500
-    except Exception:
-        online = False
+    client = get_client()
+    online = False
+    for method, url in _CONNECTIVITY_PROBES:
+        try:
+            if method == "HEAD":
+                resp = await client.head(url, timeout=_CONNECTIVITY_TIMEOUT_SEC)
+            else:
+                resp = await client.get(url, timeout=_CONNECTIVITY_TIMEOUT_SEC)
+            if resp.status_code < 500:
+                online = True
+                break
+        except Exception:
+            continue
 
     _connectivity_cache = (online, time.monotonic())
     logger.debug("Connectivity check: %s", "online" if online else "offline")

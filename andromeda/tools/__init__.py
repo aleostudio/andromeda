@@ -17,7 +17,6 @@ _TOOLS = [
     get_latest_news, 
     get_weather, 
     set_timer,
-    system_control, 
     knowledge_base, 
     web_search,
 ]
@@ -37,12 +36,18 @@ def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFe
 
     for tool_module in _TOOLS:
         agent.register_tool(tool_module.DEFINITION, tool_module.handler)
+    if tools_cfg.allow_system_control:
+        agent.register_tool(system_control.DEFINITION, system_control.handler)
 
     # Fast intents — bypass LLM for simple, deterministic requests
     register_intent(patterns=[r"\b(che\s+)?or[ae]\b", r"\bche\s+ore\s+sono\b"], tool_handler=get_datetime.handler)
     register_intent(patterns=[r"\b(che\s+)?giorno\b", r"\b(che\s+)?data\b"], tool_handler=get_datetime.handler)
-    register_intent(patterns=[r"\balza.*volume\b", r"\bvolume.*alto\b", r"\bpiù\s+forte\b"], tool_handler=system_control.handler, args={"action": "volume_up"})
-    register_intent(patterns=[r"\babbassa.*volume\b", r"\bvolume.*basso\b", r"\bpiù\s+piano\b"], tool_handler=system_control.handler, args={"action": "volume_down"})
-    register_intent(patterns=[r"\bmut[ao]\b.*\b(volume|audio)\b", r"\b(volume|audio)\b.*\bmut[ao]\b", r"\bsilenzi[oa]\b"], tool_handler=system_control.handler, args={"action": "volume_mute"})
+    intents_count = 2
+    if tools_cfg.allow_system_control:
+        register_intent(patterns=[r"\balza.*volume\b", r"\bvolume.*alto\b", r"\bpiù\s+forte\b"], tool_handler=system_control.handler, args={"action": "volume_up"})
+        register_intent(patterns=[r"\babbassa.*volume\b", r"\bvolume.*basso\b", r"\bpiù\s+piano\b"], tool_handler=system_control.handler, args={"action": "volume_down"})
+        register_intent(patterns=[r"\bmut[ao]\b.*\b(volume|audio)\b", r"\b(volume|audio)\b.*\bmut[ao]\b", r"\bsilenzi[oa]\b"], tool_handler=system_control.handler, args={"action": "volume_mute"})
+        intents_count += 3
 
-    logger.info("Registered %d tools, %d fast intents", len(_TOOLS), 5)
+    tools_count = len(_TOOLS) + (1 if tools_cfg.allow_system_control else 0)
+    logger.info("Registered %d tools, %d fast intents", tools_count, intents_count)

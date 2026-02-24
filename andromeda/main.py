@@ -338,7 +338,7 @@ class VoiceAssistant:
 
     # Streaming mode: speak sentence-by-sentence as LLM generates
     async def _process_streaming(self, text: str) -> None:
-        sentence_queue: asyncio.Queue[str | None] = asyncio.Queue()
+        sentence_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=32)
 
         # Enable wake word detection during TTS for voice interruption
         self._wake_word.reset()
@@ -484,8 +484,11 @@ def main() -> None:
         except Exception:
             pass  # Best-effort during shutdown
 
-    loop.add_signal_handler(signal.SIGINT, shutdown_handler)
-    loop.add_signal_handler(signal.SIGTERM, shutdown_handler)
+    try:
+        loop.add_signal_handler(signal.SIGINT, shutdown_handler)
+        loop.add_signal_handler(signal.SIGTERM, shutdown_handler)
+    except NotImplementedError:
+        logger.warning("Signal handlers are not supported on this platform")
 
     try:
         with contextlib.suppress(asyncio.CancelledError):
