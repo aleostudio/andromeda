@@ -6,7 +6,17 @@ from andromeda.agent import AIAgent
 from andromeda.config import ToolsConfig
 from andromeda.feedback import AudioFeedback
 from andromeda.intent import clear_intents, register_intent
-from andromeda.tools import (get_datetime, get_latest_news, get_weather, knowledge_base, set_timer, system_control, web_search)
+from andromeda.tools import (
+    get_datetime, 
+    get_latest_news, 
+    get_weather, 
+    knowledge_base, 
+    set_timer, 
+    system_control, 
+    web_search, 
+    # query_mongodb,
+    # query_postgres,
+)
 
 logger = logging.getLogger("[ TOOLS ]")
 
@@ -19,6 +29,10 @@ _TOOLS = [
     set_timer,
     knowledge_base, 
     web_search,
+
+    # Disabled - just for test
+    # query_mongodb,
+    # query_postgres,
 ]
 
 
