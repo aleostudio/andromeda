@@ -51,6 +51,7 @@ DEFINITION = {
 def configure(feedback, max_sec: int) -> None:
     for task in _state.active_timers.values():
         task.cancel()
+
     _state.active_timers = {}
     _state.feedback = feedback
     _state.max_sec = max_sec
@@ -63,10 +64,12 @@ async def _timer_task(timer_id: str, seconds: int, label: str) -> None:
         audit_logger.info("tool=set_timer event=completed timer_id=%s label=%s seconds=%d", timer_id, label, seconds)
         if _state.feedback:
             loop = asyncio.get_running_loop()
+
             # Play wake sound 3 times as alarm (in executor to avoid blocking event loop)
             for _ in range(3):
                 await loop.run_in_executor(None, _state.feedback.play_blocking, "wake")
                 await asyncio.sleep(0.3)
+
     except asyncio.CancelledError:
         logger.info("Timer '%s' cancelled", timer_id)
         audit_logger.info("tool=set_timer event=cancelled timer_id=%s label=%s", timer_id, label)

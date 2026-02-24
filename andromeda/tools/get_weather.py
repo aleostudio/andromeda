@@ -66,14 +66,8 @@ async def handler(args: dict) -> str:
 
     try:
         # Geocode city name to coordinates
-        geo_resp = await request_with_retry(
-            "GET",
-            "https://geocoding-api.open-meteo.com/v1/search",
-            params={"name": city, "count": 1, "language": "it"},
-            timeout_sec=_state.timeout_sec,
-        )
+        geo_resp = await request_with_retry("GET", "https://geocoding-api.open-meteo.com/v1/search", params={"name": city, "count": 1, "language": "it"}, timeout_sec=_state.timeout_sec)
         geo_data = geo_resp.json()
-
         results = geo_data.get("results", [])
         if not results:
             return msg("weather.city_not_found", city=city)
@@ -83,17 +77,7 @@ async def handler(args: dict) -> str:
         city_name = loc.get("name", city)
 
         # Fetch current weather
-        weather_resp = await request_with_retry(
-            "GET",
-            "https://api.open-meteo.com/v1/forecast",
-            params={
-                "latitude": lat,
-                "longitude": lon,
-                "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
-                "timezone": "auto",
-            },
-            timeout_sec=_state.timeout_sec,
-        )
+        weather_resp = await request_with_retry("GET", "https://api.open-meteo.com/v1/forecast", params={"latitude": lat, "longitude": lon, "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m", "timezone": "auto"}, timeout_sec=_state.timeout_sec)
         weather_data = weather_resp.json()
         current = weather_data.get("current", {})
         temp = current.get("temperature_2m", "N/D")
@@ -101,19 +85,13 @@ async def handler(args: dict) -> str:
         wind = current.get("wind_speed_10m", "N/D")
         code = current.get("weather_code", -1)
         condition = weather_condition(code)
-        result = msg(
-            "weather.output",
-            city=city_name,
-            condition=condition,
-            temp=temp,
-            humidity=humidity,
-            wind=wind,
-        )
+        result = msg("weather.output", city=city_name, condition=condition, temp=temp, humidity=humidity, wind=wind)
 
         # Cache the result (evict oldest if full)
         if len(_state.cache) >= _CACHE_MAX_SIZE:
             oldest_key = min(_state.cache, key=lambda k: _state.cache[k][1])
             del _state.cache[oldest_key]
+
         _state.cache[cache_key] = (result, time.monotonic())
 
         return result

@@ -119,14 +119,8 @@ class AIAgent:
             summary_response = await self._client.post(_MODEL_CHAT_PATH, json={
                 "model": self._cfg.model,
                 "messages": [
-                    {
-                        "role": "system",
-                        "content": "Riassumi brevemente questa conversazione in 2-3 frasi in italiano. Cattura solo i punti chiave e le informazioni importanti."
-                    },
-                    {
-                        "role": "user",
-                        "content": compact_text
-                    },
+                    {"role": "system", "content": "Riassumi brevemente questa conversazione in 2-3 frasi in italiano. Cattura solo i punti chiave e le informazioni importanti."},
+                    {"role": "user", "content": compact_text},
                 ],
                 "stream": False,
                 "options": {"num_predict": 150},
@@ -136,10 +130,7 @@ class AIAgent:
 
             if summary:
                 self._conversation = [
-                    {
-                        "role": "system",
-                        "content": f"[Riepilogo conversazione precedente: {summary}]"
-                    },
+                    {"role": "system", "content": f"[Riepilogo conversazione precedente: {summary}]"},
                     *recent_turns,
                 ]
                 logger.info("History compacted: %d turns -> summary + %d recent", len(turns_to_compact), len(recent_turns))

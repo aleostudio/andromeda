@@ -140,11 +140,13 @@ def _save_store(data: dict) -> None:
 def _action_save(store: dict, key: str, value: str, allow_sensitive: bool) -> str:
     if not key or not value:
         return msg("kb.save_missing_fields")
+
     key_value_text = f"{key} {value}"
     is_sensitive = _is_sensitive_text(key_value_text)
     if is_sensitive and not _state.allow_sensitive_memory and not allow_sensitive:
         audit_logger.info("tool=knowledge_base action=save_blocked_sensitive key=%s", key)
         return msg("kb.sensitive_blocked")
+
     store[key] = value
     _save_store(store)
     logger.info("Knowledge base: saved '%s'", key)
@@ -156,13 +158,16 @@ def _action_save(store: dict, key: str, value: str, allow_sensitive: bool) -> st
 def _action_recall(store: dict, key: str) -> str:
     if not key:
         return msg("kb.recall_missing_key")
+
     result = store.get(key)
     if result is not None:
         return f"{key}: {result}"
+
     # Fuzzy search: check if key is substring of any stored key
     matches = {k: v for k, v in store.items() if key.lower() in k.lower()}
     if not matches:
         return msg("kb.recall_not_found", key=key)
+
     parts = [f"- {k}: {v}" for k, v in matches.items()]
 
     return msg("kb.recall_matches", matches=", ".join(parts))

@@ -96,6 +96,7 @@ def _is_allowed_url(url: str) -> bool:
     hostname = (parsed.hostname or "").lower()
     if not hostname:
         return False
+
     if hostname in ("localhost",) or hostname.endswith(".local"):
         return False
 
@@ -175,6 +176,7 @@ async def _fetch_and_extract(url: str) -> str:
 def _sanitize_content(text: str) -> str:
     if not text:
         return ""
+
     cleaned = text
     for pattern in _INJECTION_PATTERNS:
         cleaned = pattern.sub(" ", cleaned)
@@ -207,12 +209,7 @@ async def _check_connectivity() -> bool:
 # Search DuckDuckGo and return formatted results
 async def _handle_search(query: str) -> str:
     try:
-        search_resp = await request_with_retry(
-            "GET",
-            "https://html.duckduckgo.com/html/",
-            params={"q": query},
-            timeout_sec=_state.timeout_sec,
-        )
+        search_resp = await request_with_retry("GET", "https://html.duckduckgo.com/html/", params={"q": query}, timeout_sec=_state.timeout_sec)
         results = _parse_search_results(search_resp.text, _state.max_results)
         if not results:
             return msg("web.no_results")
@@ -281,6 +278,7 @@ async def handler(args: dict) -> str:
 
     if not query and not url:
         return msg("web.missing_query_or_url")
+
     if url and not _is_allowed_url(url):
         return msg("web.url_not_allowed")
 
@@ -312,6 +310,7 @@ async def handler(args: dict) -> str:
     if len(_state.cache) >= _CACHE_MAX_SIZE:
         oldest_key = min(_state.cache, key=lambda k: _state.cache[k][1])
         del _state.cache[oldest_key]
+
     _state.cache[cache_key] = (output, time.monotonic())
 
     return output

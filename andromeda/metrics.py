@@ -86,7 +86,7 @@ class PerformanceMetrics:
     def log_summary(self) -> None:
         if not self._phases:
             return
-        logger.debug("[PERF] === Performance Summary ===")
+        logger.debug("[PERF] Performance Summary")
         for name, m in sorted(self._phases.items()):
             logger.debug("[PERF]   %s: avg=%.0fms, min=%.0fms, max=%.0fms, count=%d", name, m.avg_ms, m.min_ms, m.max_ms, m.count)
 

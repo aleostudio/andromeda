@@ -74,10 +74,12 @@ class TextToSpeech:
                 try:
                     from piper import PiperVoice
                     from piper.config import SynthesisConfig
+
                     self._voice = PiperVoice.load(self._tts_cfg.piper_model_path, config_path=self._tts_cfg.piper_model_config)
                     self._syn_config = SynthesisConfig(speaker_id=self._tts_cfg.speaker_id or None, length_scale=self._tts_cfg.length_scale or None)
                     self._synthesize_fn = self._synthesize_piper
                     logger.info("Piper TTS loaded: %s (length_scale=%.2f)", self._tts_cfg.piper_model_path, self._tts_cfg.length_scale)
+
                 except FileNotFoundError:
                     logger.error("Piper model not found at %s", self._tts_cfg.piper_model_path)
                     raise
@@ -110,6 +112,7 @@ class TextToSpeech:
                     self._kokoro_pipeline = KPipeline(lang_code=self._kokoro_lang_code, repo_id=self._kokoro_repo_id)
                     self._synthesize_fn = self._synthesize_kokoro
                     logger.info("Kokoro TTS loaded: repo=%s (lang=%s, voice=%s, speed=%.2f)", self._kokoro_repo_id, self._kokoro_lang_code, self._kokoro_voice, self._kokoro_speed)
+
                 except Exception:
                     logger.exception("Failed to load Kokoro TTS")
                     raise
@@ -244,13 +247,12 @@ class TextToSpeech:
             # Signal thinking tone to fade out before TTS takes over
             if self._on_first_audio:
                 self._on_first_audio()
-            self._playback_stream = sd.OutputStream(
-                samplerate=sample_rate,
-                channels=1,
-                dtype="float32",
-            )
+
+            self._playback_stream = sd.OutputStream(samplerate=sample_rate, channels=1, dtype="float32")
             self._playback_stream.start()
+
             return True
+
         except Exception:
             logger.exception("Failed to open streaming audio output")
             return False
@@ -261,6 +263,7 @@ class TextToSpeech:
     async def _collect_prefetch(task: asyncio.Task | None) -> tuple[str, np.ndarray, int] | None:
         if task is None:
             return None
+
         try:
             return await task
         except Exception:
@@ -300,6 +303,7 @@ class TextToSpeech:
             return None
 
         audio, sr = await self._synthesize_cached(loop, sentence)
+
         return sentence, audio, sr
 
 
@@ -441,7 +445,7 @@ class TextToSpeech:
             self._playback_stream = None
 
 
-# Check if is currently speaking
+    # Check if is currently speaking
     @property
     def is_speaking(self) -> bool:
         return self._is_speaking

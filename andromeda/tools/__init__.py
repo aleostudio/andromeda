@@ -38,6 +38,7 @@ def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFe
 
     for tool_module in _TOOLS:
         agent.register_tool(tool_module.DEFINITION, tool_module.handler)
+
     if tools_cfg.allow_system_control:
         agent.register_tool(system_control.DEFINITION, system_control.handler)
 
@@ -45,6 +46,7 @@ def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFe
     register_intent(patterns=[r"\b(che\s+)?or[ae]\b", r"\bche\s+ore\s+sono\b"], tool_handler=get_datetime.handler)
     register_intent(patterns=[r"\b(che\s+)?giorno\b", r"\b(che\s+)?data\b"], tool_handler=get_datetime.handler)
     intents_count = 2
+
     if tools_cfg.allow_system_control:
         register_intent(patterns=[r"\balza.*volume\b", r"\bvolume.*alto\b", r"\bpiù\s+forte\b"], tool_handler=system_control.handler, args={"action": "volume_up"})
         register_intent(patterns=[r"\babbassa.*volume\b", r"\bvolume.*basso\b", r"\bpiù\s+piano\b"], tool_handler=system_control.handler, args={"action": "volume_down"})

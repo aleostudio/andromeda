@@ -9,9 +9,11 @@ _MESSAGES = {
         "core.not_understood_retry": "Non ho capito. Puoi ripetere?",
         "core.generic_error_retry": "Si è verificato un errore. Riprova.",
         "core.processing_error_retry": "Ho riscontrato un errore. Ripeti la domanda.",
+
         "agent.ollama_unreachable": "Non riesco a connettermi al modello. Verifica che Ollama sia in esecuzione.",
         "agent.ollama_timeout": "La richiesta ha impiegato troppo tempo. Riprova.",
         "agent.request_too_complex": "Mi dispiace, la richiesta è troppo complessa. Puoi riformulare?",
+
         "system.volume_up": "Volume alzato",
         "system.volume_down": "Volume abbassato",
         "system.volume_toggle": "Audio mutato o smutato",
@@ -28,6 +30,7 @@ _MESSAGES = {
         "system.tool_hint_darwin": "osascript (incluso in macOS)",
         "system.tool_hint_linux": "pactl (PulseAudio) e brightnessctl",
         "system.tool_hint_windows": "nircmd (nirsoft.net)",
+
         "datetime.output": "Data: {date}, Ora: {time}",
         "timer.invalid_seconds": "Errore: la durata deve essere un numero intero di secondi.",
         "timer.non_positive": "Errore: la durata deve essere maggiore di zero.",
@@ -36,6 +39,7 @@ _MESSAGES = {
         "timer.duration_minutes_seconds": "{minutes} minuti e {seconds} secondi",
         "timer.duration_minutes": "{minutes} minuti",
         "timer.duration_seconds": "{seconds} secondi",
+
         "kb.invalid_action": "Azione '{action}' non riconosciuta. Usa: save, recall, list, delete.",
         "kb.save_missing_fields": "Errore: serve sia una chiave che un valore per salvare.",
         "kb.sensitive_blocked": "Dato sensibile rilevato. Per salvare questa informazione imposta allow_sensitive a true dopo conferma esplicita.",
@@ -48,6 +52,7 @@ _MESSAGES = {
         "kb.delete_missing_key": "Errore: specifica quale informazione vuoi eliminare.",
         "kb.delete_not_found": "'{key}' non è presente in memoria.",
         "kb.deleted": "Ho eliminato '{key}' dalla memoria.",
+
         "weather.missing_city": "Errore: nessuna città specificata.",
         "weather.city_not_found": "Non ho trovato la città '{city}'.",
         "weather.output": "Meteo a {city}: {condition}, temperatura {temp}°C, umidità {humidity}%, vento {wind} km/h",
@@ -56,12 +61,14 @@ _MESSAGES = {
         "weather.unavailable": "Il servizio meteo è temporaneamente non disponibile. Riprova tra poco.",
         "weather.generic_error": "Errore nel recupero dei dati meteo.",
         "weather.unknown_condition": "condizioni sconosciute",
+
         "news.none_found": "Nessuna notizia trovata per la categoria '{category}' su Il Post.",
         "news.output_header": "Ultime notizie Il Post - {category} (aggiornate al {now}): ",
         "news.http_error": "Errore nel recupero delle notizie: HTTP {status}",
         "news.connection_error": "Errore di connessione a Il Post: {error}",
         "news.unavailable": "Il servizio notizie è temporaneamente non disponibile. Riprova tra poco.",
         "news.generic_error": "Errore imprevisto nel recupero delle notizie: {error}",
+
         "web.offline": "Non conosco la risposta e al momento non posso cercare online. Riprova quando sarà disponibile una connessione.",
         "web.no_results": "Non ho trovato risultati utili per questa ricerca. Non so rispondere.",
         "web.search_output": "Risultati della ricerca web per '{query}': ",
@@ -82,9 +89,11 @@ _MESSAGES = {
         "core.not_understood_retry": "I did not understand. Could you repeat?",
         "core.generic_error_retry": "An error occurred. Please try again.",
         "core.processing_error_retry": "I encountered an error. Please repeat your request.",
+
         "agent.ollama_unreachable": "I cannot connect to the model. Please verify that Ollama is running.",
         "agent.ollama_timeout": "The request took too long. Please try again.",
         "agent.request_too_complex": "I am sorry, this request is too complex. Could you rephrase it?",
+
         "system.volume_up": "Volume increased",
         "system.volume_down": "Volume decreased",
         "system.volume_toggle": "Audio muted or unmuted",
@@ -101,6 +110,7 @@ _MESSAGES = {
         "system.tool_hint_darwin": "osascript (included in macOS)",
         "system.tool_hint_linux": "pactl (PulseAudio) and brightnessctl",
         "system.tool_hint_windows": "nircmd (nirsoft.net)",
+
         "datetime.output": "Date: {date}, Time: {time}",
         "timer.invalid_seconds": "Error: duration must be an integer number of seconds.",
         "timer.non_positive": "Error: duration must be greater than zero.",
@@ -109,6 +119,7 @@ _MESSAGES = {
         "timer.duration_minutes_seconds": "{minutes} minutes and {seconds} seconds",
         "timer.duration_minutes": "{minutes} minutes",
         "timer.duration_seconds": "{seconds} seconds",
+
         "kb.invalid_action": "Action '{action}' is not recognized. Use: save, recall, list, delete.",
         "kb.save_missing_fields": "Error: both key and value are required to save.",
         "kb.sensitive_blocked": "Sensitive data detected. To save this information, set allow_sensitive to true after explicit confirmation.",
@@ -121,6 +132,7 @@ _MESSAGES = {
         "kb.delete_missing_key": "Error: specify which information you want to delete.",
         "kb.delete_not_found": "'{key}' is not present in memory.",
         "kb.deleted": "I removed '{key}' from memory.",
+
         "weather.missing_city": "Error: no city specified.",
         "weather.city_not_found": "I could not find the city '{city}'.",
         "weather.output": "Weather in {city}: {condition}, temperature {temp}°C, humidity {humidity}%, wind {wind} km/h",
@@ -129,12 +141,14 @@ _MESSAGES = {
         "weather.unavailable": "The weather service is temporarily unavailable. Please try again soon.",
         "weather.generic_error": "Error while retrieving weather data.",
         "weather.unknown_condition": "unknown conditions",
+
         "news.none_found": "No news found for category '{category}' on Il Post.",
         "news.output_header": "Latest Il Post news - {category} (updated at {now}): ",
         "news.http_error": "Error retrieving news: HTTP {status}",
         "news.connection_error": "Connection error to Il Post: {error}",
         "news.unavailable": "The news service is temporarily unavailable. Please try again soon.",
         "news.generic_error": "Unexpected error while retrieving news: {error}",
+
         "web.offline": "I do not know the answer and I cannot search online right now. Please try again when a connection is available.",
         "web.no_results": "I could not find useful results for this search. I cannot answer.",
         "web.search_output": "Web search results for '{query}': ",

@@ -30,11 +30,7 @@ _CIRCUIT_OPEN_SEC = 20.0
 def get_client() -> httpx.AsyncClient:
     global _client
     if _client is None or _client.is_closed:
-        _client = httpx.AsyncClient(
-            headers=_HEADERS,
-            timeout=httpx.Timeout(15.0, connect=5.0),
-            follow_redirects=True,
-        )
+        _client = httpx.AsyncClient(headers=_HEADERS, timeout=httpx.Timeout(15.0, connect=5.0), follow_redirects=True)
         logger.debug("Shared HTTP client created")
 
     return _client
@@ -66,6 +62,7 @@ def _mark_failure(key: str) -> None:
     if fails >= _CIRCUIT_FAIL_THRESHOLD:
         open_until = time.monotonic() + _CIRCUIT_OPEN_SEC
         logger.warning("Circuit opened for %s", key)
+
     _circuit_state[key] = {"fails": fails, "open_until": open_until}
 
 
@@ -74,26 +71,17 @@ def _is_retryable_status(status_code: int) -> bool:
 
 
 def _build_http_error(response: httpx.Response) -> httpx.HTTPStatusError:
-    return httpx.HTTPStatusError(
-        f"HTTP {response.status_code}",
-        request=response.request,
-        response=response,
-    )
+    return httpx.HTTPStatusError(f"HTTP {response.status_code}", request=response.request, response=response)
 
 
-async def _request_once(
-    client: httpx.AsyncClient,
-    method: str,
-    url: str,
-    *,
-    params: dict | None = None,
-    timeout_sec: float | None = None,
-) -> httpx.Response:
+async def _request_once(client: httpx.AsyncClient, method: str, url: str, *, params: dict | None = None, timeout_sec: float | None = None) -> httpx.Response:
     try:
         if timeout_sec is None:
             return await client.request(method, url, params=params)
+
         async with asyncio.timeout(timeout_sec):
             return await client.request(method, url, params=params)
+
     except TimeoutError as e:
         raise httpx.TimeoutException("Request timeout") from e
 
@@ -112,22 +100,9 @@ class _AttemptResult:
     should_mark_failure: bool = False
 
 
-async def _attempt_request(
-    client: httpx.AsyncClient,
-    method: str,
-    url: str,
-    *,
-    params: dict | None = None,
-    timeout_sec: float | None = None,
-) -> _AttemptResult:
+async def _attempt_request(client: httpx.AsyncClient, method: str, url: str, *, params: dict | None = None, timeout_sec: float | None = None) -> _AttemptResult:
     try:
-        response = await _request_once(
-            client,
-            method,
-            url,
-            params=params,
-            timeout_sec=timeout_sec,
-        )
+        response = await _request_once(client, method, url, params=params, timeout_sec=timeout_sec)
         if response.status_code >= 400:
             raise _build_http_error(response)
 
@@ -143,15 +118,7 @@ async def _attempt_request(
         return _AttemptResult(error=e, should_retry=True, should_mark_failure=True)
 
 
-async def request_with_retry(
-    method: str,
-    url: str,
-    *,
-    params: dict | None = None,
-    timeout_sec: float | None = None,
-    retries: int = 2,
-    backoff_sec: float = 0.25,
-) -> httpx.Response:
+async def request_with_retry(method: str, url: str, *, params: dict | None = None, timeout_sec: float | None = None, retries: int = 2, backoff_sec: float = 0.25) -> httpx.Response:
     key = _circuit_key(url)
     if _is_circuit_open(key):
         raise RuntimeError("Circuit open")
@@ -160,13 +127,7 @@ async def request_with_retry(
     attempts = retries + 1
 
     for attempt in range(attempts):
-        result = await _attempt_request(
-            client,
-            method,
-            url,
-            params=params,
-            timeout_sec=timeout_sec,
-        )
+        result = await _attempt_request(client, method, url, params=params, timeout_sec=timeout_sec)
         if result.response is not None:
             _mark_success(key)
             return result.response
@@ -190,4 +151,5 @@ async def close_client() -> None:
         await _client.aclose()
         _client = None
         logger.debug("Shared HTTP client closed")
+
     _circuit_state = {}

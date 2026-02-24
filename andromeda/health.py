@@ -36,12 +36,7 @@ class HealthCheckServer:
 
         import time
         self._uptime_start = time.monotonic()
-
-        self._server = await asyncio.start_server(
-            self._handle_connection,
-            self._config.host,
-            self._config.port,
-        )
+        self._server = await asyncio.start_server(self._handle_connection, self._config.host, self._config.port)
         logger.info("Health check server started on %s:%d", self._config.host, self._config.port)
 
 
@@ -95,6 +90,7 @@ class HealthCheckServer:
         parts = request_line.split()
         if len(parts) < 3:
             return "", "", False
+
         method, path, http_version = parts[0], parts[1], parts[2]
         if not http_version.startswith("HTTP/"):
             return "", "", False

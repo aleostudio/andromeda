@@ -97,7 +97,6 @@ def _windows_actions() -> dict:
             "response": _VOLUME_TOGGLE,
         },
         "volume_get": {
-            # nircmd doesn't support reading volume; fallback message
             "cmd": None,
             "response": None,
         },

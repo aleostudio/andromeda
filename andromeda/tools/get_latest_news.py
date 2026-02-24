@@ -160,7 +160,6 @@ async def handler(args: dict) -> str:
             return msg("news.none_found", category=category)
 
         now = datetime.now().strftime("%d/%m/%Y %H:%M")
-
         news = msg("news.output_header", category=category.upper(), now=now)
         for i, art in enumerate(articles, 1):
             news = news + str(i) + ": " + art['title'] + ". "
@@ -169,6 +168,7 @@ async def handler(args: dict) -> str:
         if len(_state.cache) >= _CACHE_MAX_SIZE:
             oldest_key = min(_state.cache, key=lambda k: _state.cache[k][1])
             del _state.cache[oldest_key]
+
         _state.cache[cache_key] = (news, time.monotonic())
 
         return news

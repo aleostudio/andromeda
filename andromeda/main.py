@@ -64,7 +64,7 @@ class VoiceAssistant:
         self._calibration_vad = webrtcvad.Vad(config.vad.aggressiveness)  # Reuse for calibration
 
 
-    # Initialize all components. Call before run().
+    # Initialize all components. Call before run()
     def initialize(self) -> None:
         set_locale(self._cfg.stt.language)
         logger.info(".-------------------------------------------------------------.")
@@ -229,6 +229,7 @@ class VoiceAssistant:
         if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
             logger.info("Recording too short or no speech detected, asking user to retry")
             await self._speak_error(msg("core.no_speech_retry"))
+
             return AssistantState.IDLE
 
         self._feedback.play("done")
@@ -281,6 +282,7 @@ class VoiceAssistant:
         if not text.strip():
             logger.info("Empty transcription, asking user to repeat")
             await self._speak_error(msg("core.not_understood_retry"))
+
             return AssistantState.SPEAKING
 
         logger.info("User said: %s", text)
@@ -341,6 +343,7 @@ class VoiceAssistant:
         monitor_task = asyncio.create_task(self._monitor_interrupt())
         with self._metrics.measure("tts"):
             await self._tts.speak(self._response_text)
+
         monitor_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await monitor_task

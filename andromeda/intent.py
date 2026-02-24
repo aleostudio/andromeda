@@ -14,7 +14,6 @@ logger = logging.getLogger("[ INTENT ]")
 # Fast intent matcher — intercepts simple requests before they reach the LLM.
 # Each intent has keyword patterns and a tool handler to call directly.
 # Returns None if no intent matched (falls through to LLM).
-
 _intents: list[dict] = []
 _lock = threading.Lock()
 
@@ -40,7 +39,9 @@ async def match_and_execute(text: str) -> str | None:
             try:
                 if pattern.search(text_lower):
                     logger.info("Fast intent matched: %s", pattern.pattern)
+
                     return await _run_handler(intent["handler"], intent["args"])
+
             except Exception:
                 logger.exception("Fast intent error: %s", pattern.pattern)
                 return None
@@ -52,7 +53,9 @@ async def _run_handler(handler: Callable, args: dict) -> str:
     try:
         if inspect.iscoroutinefunction(handler):
             return str(await handler(args))
+
         return str(handler(args))
+
     except Exception:
         logger.exception("Fast intent handler failed")
 
