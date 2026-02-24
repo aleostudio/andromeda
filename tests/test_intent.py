@@ -3,15 +3,15 @@
 
 import asyncio
 import pytest
-from andromeda.intent import _intents, match_and_execute, register_intent
+from andromeda.intent import _intents, clear_intents, match_and_execute, register_intent
 
 
 @pytest.fixture(autouse=True)
-def clear_intents():
+def clear_registered_intents():
     """Clear registered intents before each test."""
-    _intents.clear()
+    clear_intents()
     yield
-    _intents.clear()
+    clear_intents()
 
 
 class TestRegisterIntent:

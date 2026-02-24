@@ -197,8 +197,11 @@ class TestToolsConfig:
     def test_defaults(self):
         cfg = ToolsConfig()
         assert cfg.knowledge_base_path == "data/knowledge.json"
+        assert cfg.allow_sensitive_memory is False
         assert cfg.weather_timeout_sec == pytest.approx(10.0)
+        assert cfg.news_timeout_sec == pytest.approx(10.0)
         assert cfg.timer_max_sec == 3600
+        assert cfg.allow_system_control is True
 
 
 class TestAppConfig:

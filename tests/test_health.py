@@ -132,3 +132,57 @@ class TestHealthCheckHTTP:
                 await server.stop()
 
         _run(_test())
+
+    def test_http_not_found(self):
+        async def _test():
+            server = HealthCheckServer(
+                HealthCheckConfig(enabled=True, port=18082),
+            )
+            await server.start()
+
+            try:
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1", 18082,
+                )
+                writer.write(
+                    b"GET /status HTTP/1.1\r\nHost: localhost\r\n\r\n",
+                )
+                await writer.drain()
+
+                response = await asyncio.wait_for(
+                    reader.read(4096), timeout=5.0,
+                )
+                response_str = response.decode("utf-8")
+                assert "HTTP/1.1 404 Not Found" in response_str
+                writer.close()
+            finally:
+                await server.stop()
+
+        _run(_test())
+
+    def test_http_method_not_allowed(self):
+        async def _test():
+            server = HealthCheckServer(
+                HealthCheckConfig(enabled=True, port=18083),
+            )
+            await server.start()
+
+            try:
+                reader, writer = await asyncio.open_connection(
+                    "127.0.0.1", 18083,
+                )
+                writer.write(
+                    b"POST / HTTP/1.1\r\nHost: localhost\r\n\r\n",
+                )
+                await writer.drain()
+
+                response = await asyncio.wait_for(
+                    reader.read(4096), timeout=5.0,
+                )
+                response_str = response.decode("utf-8")
+                assert "HTTP/1.1 405 Method Not Allowed" in response_str
+                writer.close()
+            finally:
+                await server.stop()
+
+        _run(_test())

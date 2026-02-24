@@ -11,6 +11,8 @@ import time
 import httpx
 from collections.abc import Callable
 from andromeda.config import AgentConfig, ConversationConfig
+from andromeda.messages import (GENERIC_ERROR_RETRY, OLLAMA_TIMEOUT,
+                                OLLAMA_UNREACHABLE, REQUEST_TOO_COMPLEX)
 
 logger = logging.getLogger("[ AGENT ]")
 
@@ -176,13 +178,13 @@ class AIAgent:
 
         except httpx.ConnectError:
             logger.error("Cannot connect to Ollama at %s. Is it running?", self._cfg.base_url)
-            return "Non riesco a connettermi al modello. Verifica che Ollama sia in esecuzione."
+            return OLLAMA_UNREACHABLE
         except httpx.TimeoutException:
             logger.error("Ollama request timed out")
-            return "La richiesta ha impiegato troppo tempo. Riprova."
+            return OLLAMA_TIMEOUT
         except Exception:
             logger.exception("Agent processing failed")
-            return "Si è verificato un errore. Riprova."
+            return GENERIC_ERROR_RETRY
 
 
     # Streaming version: push sentences to queue as they are generated
@@ -210,17 +212,17 @@ class AIAgent:
 
         except httpx.ConnectError:
             logger.error("Cannot connect to Ollama at %s. Is it running?", self._cfg.base_url)
-            msg = "Non riesco a connettermi al modello. Verifica che Ollama sia in esecuzione."
+            msg = OLLAMA_UNREACHABLE
             await self._queue_put(sentence_queue, msg)
             return msg
         except httpx.TimeoutException:
             logger.error("Ollama request timed out")
-            msg = "La richiesta ha impiegato troppo tempo. Riprova."
+            msg = OLLAMA_TIMEOUT
             await self._queue_put(sentence_queue, msg)
             return msg
         except Exception:
             logger.exception("Agent processing failed")
-            msg = "Si è verificato un errore. Riprova."
+            msg = GENERIC_ERROR_RETRY
             await self._queue_put(sentence_queue, msg)
             return msg
         finally:
@@ -418,7 +420,7 @@ class AIAgent:
                 result = await self._execute_tool_call(tool_call)
                 messages.append({"role": "tool", "content": result})
 
-        return "Mi dispiace, la richiesta è troppo complessa. Puoi riformulare?"
+        return REQUEST_TOO_COMPLEX
 
 
     # Send a single chat request to Ollama (non-streaming)

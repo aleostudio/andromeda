@@ -3,27 +3,19 @@
 
 import logging
 import re
+import ipaddress
 import time
 import httpx
+from dataclasses import dataclass, field
 from urllib.parse import parse_qs, unquote, urlparse
 from bs4 import BeautifulSoup
-from andromeda.tools.http_client import get_client
+from andromeda.tools.http_client import request_with_retry
 
 logger = logging.getLogger("[ TOOL WEB SEARCH ]")
 
 
-_timeout_sec: float = 10.0
-_max_results: int = 3
-_max_content_chars: int = 2000
-_fetch_page_content: bool = False
-
-# Result cache: maps cache_key -> (result_str, timestamp)
-_cache: dict[str, tuple[str, float]] = {}
 _CACHE_TTL_SEC: float = 300.0  # 5 minutes
 _CACHE_MAX_SIZE: int = 100
-
-# Connectivity check cache to avoid repeated probes
-_connectivity_cache: tuple[bool, float] = (False, 0.0)
 _CONNECTIVITY_TTL_SEC: float = 30.0  # re-check every 30s
 _CONNECTIVITY_TIMEOUT_SEC: float = 3.0
 _CONNECTIVITY_PROBES: tuple[tuple[str, str], ...] = (
@@ -38,6 +30,19 @@ _INJECTION_PATTERNS = (
     re.compile(r"jailbreak", re.IGNORECASE),
     re.compile(r"act\s+as\s+", re.IGNORECASE),
 )
+
+
+@dataclass
+class _WebSearchState:
+    timeout_sec: float = 10.0
+    max_results: int = 3
+    max_content_chars: int = 2000
+    fetch_page_content: bool = False
+    cache: dict[str, tuple[str, float]] = field(default_factory=dict)
+    connectivity_cache: tuple[bool, float] = (False, 0.0)
+
+
+_state = _WebSearchState()
 
 
 DEFINITION = {
@@ -75,12 +80,33 @@ DEFINITION = {
 
 
 def configure(timeout_sec: float, max_results: int, max_content_chars: int, fetch_page_content: bool) -> None:
-    global _timeout_sec, _max_results
-    global _max_content_chars, _fetch_page_content
-    _timeout_sec = timeout_sec
-    _max_results = max_results
-    _max_content_chars = max_content_chars
-    _fetch_page_content = fetch_page_content
+    _state.timeout_sec = timeout_sec
+    _state.max_results = max_results
+    _state.max_content_chars = max_content_chars
+    _state.fetch_page_content = fetch_page_content
+    _state.cache = {}
+    _state.connectivity_cache = (False, 0.0)
+
+
+def _is_allowed_url(url: str) -> bool:
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        return False
+
+    hostname = (parsed.hostname or "").lower()
+    if not hostname:
+        return False
+    if hostname in ("localhost",) or hostname.endswith(".local"):
+        return False
+
+    try:
+        ip = ipaddress.ip_address(hostname)
+        if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+            return False
+    except ValueError:
+        pass
+
+    return True
 
 
 # Extract real URL from DuckDuckGo redirect wrapper
@@ -118,10 +144,12 @@ def _parse_search_results(html: str, limit: int) -> list[dict]:
 
 # Fetch a page and extract its main text content
 async def _fetch_and_extract(url: str) -> str:
+    if not _is_allowed_url(url):
+        logger.warning("Blocked URL fetch for unsafe host: %s", url)
+        return ""
+
     try:
-        client = get_client()
-        resp = await client.get(url, timeout=_timeout_sec)
-        resp.raise_for_status()
+        resp = await request_with_retry("GET", url, timeout=_state.timeout_sec)
     except Exception:
         logger.debug("Failed to fetch page content from %s", url)
         return ""
@@ -156,26 +184,21 @@ def _sanitize_content(text: str) -> str:
 
 # Quick connectivity probe with caching
 async def _check_connectivity() -> bool:
-    global _connectivity_cache
-    is_online, checked_at = _connectivity_cache
+    is_online, checked_at = _state.connectivity_cache
     if (time.monotonic() - checked_at) < _CONNECTIVITY_TTL_SEC:
         return is_online
 
-    client = get_client()
     online = False
     for method, url in _CONNECTIVITY_PROBES:
         try:
-            if method == "HEAD":
-                resp = await client.head(url, timeout=_CONNECTIVITY_TIMEOUT_SEC)
-            else:
-                resp = await client.get(url, timeout=_CONNECTIVITY_TIMEOUT_SEC)
+            resp = await request_with_retry(method, url, timeout=_CONNECTIVITY_TIMEOUT_SEC, retries=0)
             if resp.status_code < 500:
                 online = True
                 break
         except Exception:
             continue
 
-    _connectivity_cache = (online, time.monotonic())
+    _state.connectivity_cache = (online, time.monotonic())
     logger.debug("Connectivity check: %s", "online" if online else "offline")
 
     return online
@@ -184,18 +207,21 @@ async def _check_connectivity() -> bool:
 # Search DuckDuckGo and return formatted results
 async def _handle_search(query: str) -> str:
     try:
-        client = get_client()
-        search_resp = await client.get("https://html.duckduckgo.com/html/", params={"q": query}, timeout=_timeout_sec)
-        search_resp.raise_for_status()
-        results = _parse_search_results(search_resp.text, _max_results)
+        search_resp = await request_with_retry(
+            "GET",
+            "https://html.duckduckgo.com/html/",
+            params={"q": query},
+            timeout=_state.timeout_sec,
+        )
+        results = _parse_search_results(search_resp.text, _state.max_results)
         if not results:
             return ("Non ho trovato risultati utili per questa ricerca. Non so rispondere.")
 
         # Optionally fetch full page content of top result
-        if _fetch_page_content:
+        if _state.fetch_page_content:
             page_text = await _fetch_and_extract(results[0]["url"])
             if page_text:
-                results[0]["content"] = page_text[:_max_content_chars]
+                results[0]["content"] = page_text[:_state.max_content_chars]
 
         # Format output with URLs so LLM can follow up
         output = f"Risultati della ricerca web per '{query}': "
@@ -213,6 +239,9 @@ async def _handle_search(query: str) -> str:
     except httpx.TimeoutException:
         logger.error("DuckDuckGo request timed out")
         return "La ricerca web ha impiegato troppo tempo."
+    except RuntimeError:
+        logger.error("Web search circuit breaker open")
+        return "La ricerca web è temporaneamente non disponibile. Riprova tra poco."
     except Exception:
         logger.exception("Web search failed")
         return "Errore nella ricerca web. Non so rispondere."
@@ -220,13 +249,16 @@ async def _handle_search(query: str) -> str:
 
 # Fetch a specific URL and return its text content
 async def _handle_fetch(url: str) -> str:
+    if not _is_allowed_url(url):
+        return "L'URL richiesto non è consentito per ragioni di sicurezza."
+
     try:
         page_text = await _fetch_and_extract(url)
 
         if not page_text:
             return f"Non sono riuscito a estrarre contenuto dalla pagina {url}."
 
-        truncated = page_text[:_max_content_chars]
+        truncated = page_text[:_state.max_content_chars]
         return f"Contenuto della pagina {url}: {truncated}"
 
     except httpx.ConnectError:
@@ -235,6 +267,9 @@ async def _handle_fetch(url: str) -> str:
     except httpx.TimeoutException:
         logger.error("Request to %s timed out", url)
         return f"La richiesta alla pagina {url} ha impiegato troppo tempo."
+    except RuntimeError:
+        logger.error("Page fetch circuit breaker open for %s", url)
+        return "Il recupero pagina è temporaneamente non disponibile. Riprova tra poco."
     except Exception:
         logger.exception("Page fetch failed for %s", url)
         return f"Errore nel recupero della pagina {url}. Non so rispondere."
@@ -246,10 +281,12 @@ async def handler(args: dict) -> str:
 
     if not query and not url:
         return "Errore: specifica 'query' o 'url'."
+    if url and not _is_allowed_url(url):
+        return "L'URL richiesto non è consentito per ragioni di sicurezza."
 
     # Build cache key from both params
     cache_key = f"q:{query.lower()}|u:{url.lower()}"
-    cached = _cache.get(cache_key)
+    cached = _state.cache.get(cache_key)
     if cached is not None:
         result, ts = cached
         if (time.monotonic() - ts) < _CACHE_TTL_SEC:
@@ -272,9 +309,9 @@ async def handler(args: dict) -> str:
         output = await _handle_search(query)
 
     # Cache the result (evict oldest if full)
-    if len(_cache) >= _CACHE_MAX_SIZE:
-        oldest_key = min(_cache, key=lambda k: _cache[k][1])
-        del _cache[oldest_key]
-    _cache[cache_key] = (output, time.monotonic())
+    if len(_state.cache) >= _CACHE_MAX_SIZE:
+        oldest_key = min(_state.cache, key=lambda k: _state.cache[k][1])
+        del _state.cache[oldest_key]
+    _state.cache[cache_key] = (output, time.monotonic())
 
     return output

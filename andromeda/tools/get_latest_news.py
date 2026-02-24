@@ -5,17 +5,25 @@ import logging
 import re
 import time
 import httpx
+from dataclasses import dataclass, field
 from datetime import datetime
 from bs4 import BeautifulSoup
-from andromeda.tools.http_client import get_client
+from andromeda.tools.http_client import request_with_retry
 
 logger = logging.getLogger("[ TOOL GET LATEST NEWS ]")
 
 
-# Result cache: maps category -> (result_str, timestamp)
-_cache: dict[str, tuple[str, float]] = {}
-_CACHE_TTL_SEC: float = 600.0  # 10 minutes
+_CACHE_TTL_SEC: float = 600.0
 _CACHE_MAX_SIZE: int = 50
+
+
+@dataclass
+class _NewsState:
+    timeout_sec: float = 10.0
+    cache: dict[str, tuple[str, float]] = field(default_factory=dict)
+
+
+_state = _NewsState()
 
 
 DEFINITION = {
@@ -119,11 +127,14 @@ def _parse_articles(html: str, limit: int) -> list[dict]:
 
 
 async def _fetch_page(url: str) -> str:
-    client = get_client()
-    response = await client.get(url)
-    response.raise_for_status()
+    response = await request_with_retry("GET", url, timeout=_state.timeout_sec)
 
     return response.text
+
+
+def configure(timeout_sec: float) -> None:
+    _state.timeout_sec = timeout_sec
+    _state.cache = {}
 
 
 async def handler(args: dict) -> str:
@@ -133,7 +144,7 @@ async def handler(args: dict) -> str:
 
     # Check cache first
     cache_key = f"{category}:{limit}"
-    cached = _cache.get(cache_key)
+    cached = _state.cache.get(cache_key)
     if cached is not None:
         result, ts = cached
         if (time.monotonic() - ts) < _CACHE_TTL_SEC:
@@ -154,10 +165,10 @@ async def handler(args: dict) -> str:
             news = news + str(i) + ": " + art['title'] + ". "
 
         # Cache the result (evict oldest if full)
-        if len(_cache) >= _CACHE_MAX_SIZE:
-            oldest_key = min(_cache, key=lambda k: _cache[k][1])
-            del _cache[oldest_key]
-        _cache[cache_key] = (news, time.monotonic())
+        if len(_state.cache) >= _CACHE_MAX_SIZE:
+            oldest_key = min(_state.cache, key=lambda k: _state.cache[k][1])
+            del _state.cache[oldest_key]
+        _state.cache[cache_key] = (news, time.monotonic())
 
         return news
 
@@ -167,6 +178,9 @@ async def handler(args: dict) -> str:
     except httpx.RequestError as e:
         logger.error("Il Post request error: %s", e)
         return f"Errore di connessione a Il Post: {e}"
+    except RuntimeError:
+        logger.error("Il Post circuit breaker open")
+        return "Il servizio notizie è temporaneamente non disponibile. Riprova tra poco."
     except Exception as e:
         logger.error("Il Post unexpected error: %s", e)
         return f"Errore imprevisto nel recupero delle notizie: {e}"

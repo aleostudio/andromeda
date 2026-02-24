@@ -4,7 +4,9 @@
 import inspect
 import logging
 import re
+import threading
 from collections.abc import Callable
+from andromeda.messages import GENERIC_ERROR_RETRY
 
 logger = logging.getLogger("[ INTENT ]")
 
@@ -14,17 +16,26 @@ logger = logging.getLogger("[ INTENT ]")
 # Returns None if no intent matched (falls through to LLM).
 
 _intents: list[dict] = []
+_lock = threading.Lock()
 
 
 def register_intent(patterns: list[str], tool_handler: Callable, args: dict | None = None) -> None:
     compiled = [re.compile(p, re.IGNORECASE) for p in patterns]
-    _intents.append({"patterns": compiled, "handler": tool_handler, "args": args or {}})
+    with _lock:
+        _intents.append({"patterns": compiled, "handler": tool_handler, "args": args or {}})
+
+
+def clear_intents() -> None:
+    with _lock:
+        _intents.clear()
 
 
 async def match_and_execute(text: str) -> str | None:
     text_lower = text.lower().strip()
+    with _lock:
+        intents = list(_intents)
 
-    for intent in _intents:
+    for intent in intents:
         for pattern in intent["patterns"]:
             try:
                 if pattern.search(text_lower):
@@ -45,4 +56,4 @@ async def _run_handler(handler: Callable, args: dict) -> str:
     except Exception:
         logger.exception("Fast intent handler failed")
 
-        return "Si è verificato un errore. Riprova."
+        return GENERIC_ERROR_RETRY

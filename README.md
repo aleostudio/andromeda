@@ -186,19 +186,19 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `audio` | `chunk_ms` | `30` | Frame size for VAD (10, 20, or 30 ms) |
 | `wake_word` | `model_path` | `models/openwakeword/andromeda.onnx` | Custom wake word model path |
 | `wake_word` | `threshold` | `0.5` | Detection confidence (0.0 - 1.0) |
-| `vad` | `aggressiveness` | `2` | WebRTC VAD aggressiveness (0-3) |
-| `vad` | `silence_timeout_sec` | `2.0` | Seconds of silence to end recording |
+| `vad` | `aggressiveness` | `3` | WebRTC VAD aggressiveness (0-3) |
+| `vad` | `silence_timeout_sec` | `1.5` | Seconds of silence to end recording |
 | `vad` | `max_recording_sec` | `30.0` | Maximum recording duration |
-| `vad` | `energy_threshold_factor` | `0.3` | Energy gate threshold multiplier |
-| `vad` | `energy_decay_rate` | `0.95` | Per-second energy threshold decay |
-| `noise` | `enabled` | `true` | Enable noise reduction on recordings |
-| `stt` | `model_size` | `large-v3` | Whisper model (tiny, base, small, medium, large-v3) |
+| `vad` | `energy_threshold_factor` | `0.6` | Energy gate threshold multiplier |
+| `vad` | `energy_decay_rate` | `0.98` | Per-second energy threshold decay |
+| `noise` | `enabled` | `false` | Enable noise reduction on recordings |
+| `stt` | `model_size` | `medium` | Whisper model (tiny, base, small, medium, large-v3) |
 | `stt` | `device` | `auto` | Compute device (auto, cpu, cuda) |
 | `stt` | `language` | `it` | Transcription language |
-| `stt` | `beam_size` | `5` | Beam search width (1 = faster, 5 = more accurate) |
+| `stt` | `beam_size` | `1` | Beam search width (1 = faster, 5 = more accurate) |
 | `agent` | `model` | `llama3.1:8b` | Ollama model name |
 | `agent` | `max_tokens` | `500` | Maximum response tokens |
-| `agent` | `streaming` | `false` | Stream TTS sentence-by-sentence |
+| `agent` | `streaming` | `true` | Stream TTS sentence-by-sentence |
 | `agent` | `prewarm` | `true` | Pre-warm LLM model at startup |
 | `tts` | `engine` | `piper` | TTS engine to use (piper - kokoro) |
 | `tts` | `piper_model_path` | `models/piper/it_IT-paola-medium.onnx` | Piper voice model, if engine=piper |
@@ -210,13 +210,16 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `conversation` | `follow_up_timeout_sec` | `5.0` | Seconds to wait for follow-up (0 = disabled) |
 | `conversation` | `history_timeout_sec` | `300.0` | Clear history after inactivity (0 = never) |
 | `tools` | `knowledge_base_path` | `data/knowledge.json` | Persistent memory storage path |
+| `tools` | `allow_sensitive_memory` | `false` | Allow saving sensitive entries in memory without explicit per-request opt-in |
 | `tools` | `timer_max_sec` | `3600` | Maximum timer duration in seconds |
+| `tools` | `allow_system_control` | `true` | Enable volume/brightness system control tool and related fast intents |
+| `tools` | `news_timeout_sec` | `10.0` | HTTP timeout for latest news tool |
 | `tools` | `web_search_timeout_sec` | `10.0` | HTTP timeout for web search |
 | `tools` | `web_search_max_results` | `3` | Number of search results to return |
 | `tools` | `web_search_max_content_chars` | `2000` | Max chars from page content extraction |
 | `tools` | `web_search_fetch_page_content` | `false` | Fetch full page content of top result |
 | `health_check` | `enabled` | `false` | Enable HTTP health check endpoint |
-| `health_check` | `host` | `0.0.0.0` | Health check server bind address |
+| `health_check` | `host` | `127.0.0.1` | Health check server bind address |
 | `health_check` | `port` | `8080` | Health check server port |
 | `logging` | `level` | `INFO` | Log level (DEBUG, INFO, WARNING, ERROR) |
 

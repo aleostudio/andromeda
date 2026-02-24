@@ -8,7 +8,9 @@ from datetime import datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
-from andromeda.tools import get_datetime, knowledge_base, set_timer, system_control
+from andromeda.config import ToolsConfig
+from andromeda.intent import clear_intents, match_and_execute
+from andromeda.tools import get_datetime, knowledge_base, register_all_tools, set_timer, system_control
 
 
 class TestGetDatetime:
@@ -54,9 +56,9 @@ class TestKnowledgeBase:
         assert "Non ho trovato" in result
 
     def test_recall_fuzzy(self):
-        knowledge_base.handler({"action": "save", "key": "password_wifi", "value": "secret"})
+        knowledge_base.handler({"action": "save", "key": "wifi_network_name", "value": "mywifi"})
         result = knowledge_base.handler({"action": "recall", "key": "wifi"})
-        assert "secret" in result
+        assert "mywifi" in result
 
     def test_list_empty(self):
         result = knowledge_base.handler({"action": "list"})
@@ -116,18 +118,31 @@ class TestKnowledgeBase:
         assert "key" in params["properties"]
         assert "value" in params["properties"]
 
+    def test_blocks_sensitive_without_opt_in(self):
+        result = knowledge_base.handler({"action": "save", "key": "wifi_password", "value": "ABC123"})
+        assert "Dato sensibile rilevato" in result
+
+    def test_sensitive_save_with_opt_in(self):
+        result = knowledge_base.handler({
+            "action": "save",
+            "key": "wifi_password",
+            "value": "ABC123",
+            "allow_sensitive": True,
+        })
+        assert "memorizzato" in result
+
 
 class TestSetTimer:
     @pytest.fixture(autouse=True)
     def setup_timer(self):
         mock_feedback = MagicMock()
         set_timer.configure(mock_feedback, max_sec=3600)
-        set_timer._active_timers.clear()
+        set_timer._state.active_timers.clear()
         yield
         # Cancel any remaining timers
-        for task in set_timer._active_timers.values():
+        for task in set_timer._state.active_timers.values():
             task.cancel()
-        set_timer._active_timers.clear()
+        set_timer._state.active_timers.clear()
 
     def test_invalid_seconds_string(self):
         result = set_timer.handler({"seconds": "abc"})
@@ -234,3 +249,38 @@ class TestSystemControl:
         params = system_control.DEFINITION["function"]["parameters"]
         assert "action" in params["properties"]
         assert "enum" in params["properties"]["action"]
+
+
+class DummyAgent:
+    def __init__(self):
+        self.registered: list[str] = []
+
+    def register_tool(self, definition, _handler):
+        self.registered.append(definition["function"]["name"])
+
+
+class TestToolRegistration:
+    @pytest.fixture(autouse=True)
+    def clear_fast_intents(self):
+        clear_intents()
+        yield
+        clear_intents()
+
+    @pytest.mark.asyncio
+    async def test_system_control_disabled(self):
+        agent = DummyAgent()
+        feedback = MagicMock()
+        cfg = ToolsConfig(allow_system_control=False)
+        register_all_tools(agent, cfg, feedback)
+
+        assert "system_control" not in agent.registered
+        assert await match_and_execute("alza il volume") is None
+
+    @pytest.mark.asyncio
+    async def test_system_control_enabled(self):
+        agent = DummyAgent()
+        feedback = MagicMock()
+        cfg = ToolsConfig(allow_system_control=True)
+        register_all_tools(agent, cfg, feedback)
+
+        assert "system_control" in agent.registered

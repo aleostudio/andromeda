@@ -4,15 +4,36 @@
 import json
 import logging
 import os
+import re
 import tempfile
+import threading
+from dataclasses import dataclass, field
 from pathlib import Path
 
 logger = logging.getLogger("[ TOOL KNOWLEDGE BASE ]")
+audit_logger = logging.getLogger("[ TOOL AUDIT ]")
 
-_store_path: str = "data/knowledge.json"
+_SENSITIVE_PATTERNS = (
+    re.compile(r"password", re.IGNORECASE),
+    re.compile(r"passwd", re.IGNORECASE),
+    re.compile(r"token", re.IGNORECASE),
+    re.compile(r"secret", re.IGNORECASE),
+    re.compile(r"api[_\s-]?key", re.IGNORECASE),
+    re.compile(r"private[_\s-]?key", re.IGNORECASE),
+    re.compile(r"\bssn\b", re.IGNORECASE),
+    re.compile(r"\bcredit[_\s-]?card\b", re.IGNORECASE),
+)
 
-# In-memory cache — avoids reading from disk on every access
-_cache: dict | None = None
+
+@dataclass
+class _KnowledgeBaseState:
+    store_path: str = "data/knowledge.json"
+    cache: dict | None = None
+    allow_sensitive_memory: bool = False
+    lock: threading.RLock = field(default_factory=threading.RLock)
+
+
+_state = _KnowledgeBaseState()
 
 
 DEFINITION = {
@@ -46,6 +67,14 @@ DEFINITION = {
                     "type": "string",
                     "description": "Valore da salvare (solo per action=save)",
                 },
+                "allow_sensitive": {
+                    "type": "boolean",
+                    "description": (
+                        "Conferma esplicita per salvare dati sensibili. "
+                        "Usa true solo se l'utente ha confermato chiaramente."
+                    ),
+                    "default": False,
+                },
             },
             "required": ["action"],
         },
@@ -53,57 +82,72 @@ DEFINITION = {
 }
 
 
-def configure(store_path: str) -> None:
-    global _store_path, _cache
-    _store_path = store_path
-    _cache = None
+def configure(store_path: str, allow_sensitive_memory: bool = False) -> None:
+    with _state.lock:
+        _state.store_path = store_path
+        _state.cache = None
+        _state.allow_sensitive_memory = allow_sensitive_memory
+
+
+def _is_sensitive_text(text: str) -> bool:
+    for pattern in _SENSITIVE_PATTERNS:
+        if pattern.search(text):
+            return True
+
+    return False
 
 
 def _load_store() -> dict:
-    global _cache
-    if _cache is not None:
-        return _cache
+    with _state.lock:
+        if _state.cache is not None:
+            return _state.cache
 
-    path = Path(_store_path)
-    if not path.exists():
-        _cache = {}
-        return _cache
-    try:
-        _cache = json.loads(path.read_text(encoding="utf-8"))
-        logger.debug("Knowledge base loaded from disk: %d entries", len(_cache))
-        return _cache
-    except (json.JSONDecodeError, OSError):
-        logger.warning("Failed to load knowledge base from %s", path)
-        _cache = {}
-        return _cache
+        path = Path(_state.store_path)
+        if not path.exists():
+            _state.cache = {}
+            return _state.cache
+        try:
+            _state.cache = json.loads(path.read_text(encoding="utf-8"))
+            logger.debug("Knowledge base loaded from disk: %d entries", len(_state.cache))
+            return _state.cache
+        except (json.JSONDecodeError, OSError):
+            logger.warning("Failed to load knowledge base from %s", path)
+            _state.cache = {}
+            return _state.cache
 
 
 def _save_store(data: dict) -> None:
-    global _cache
-    path = Path(_store_path)
-    path.parent.mkdir(parents=True, exist_ok=True)
+    with _state.lock:
+        path = Path(_state.store_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
 
-    # Atomic write: write to temp file then rename to prevent corruption on crash
-    fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+        # Atomic write: write to temp file then rename to prevent corruption on crash
+        fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
 
-    try:
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
-        os.replace(tmp_path, path)
-    except Exception:
-        os.unlink(tmp_path)
-        raise
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                json.dump(data, f, ensure_ascii=False, indent=2)
+            os.replace(tmp_path, path)
+        except Exception:
+            os.unlink(tmp_path)
+            raise
 
-    # Update in-memory cache after successful write
-    _cache = data
+        # Update in-memory cache after successful write
+        _state.cache = data
 
 
-def _action_save(store: dict, key: str, value: str) -> str:
+def _action_save(store: dict, key: str, value: str, allow_sensitive: bool) -> str:
     if not key or not value:
         return "Errore: serve sia una chiave che un valore per salvare."
+    key_value_text = f"{key} {value}"
+    is_sensitive = _is_sensitive_text(key_value_text)
+    if is_sensitive and not _state.allow_sensitive_memory and not allow_sensitive:
+        audit_logger.info("tool=knowledge_base action=save_blocked_sensitive key=%s", key)
+        return "Dato sensibile rilevato. Per salvare questa informazione imposta allow_sensitive a true dopo conferma esplicita."
     store[key] = value
     _save_store(store)
     logger.info("Knowledge base: saved '%s'", key)
+    audit_logger.info("tool=knowledge_base action=save key=%s", key)
 
     return f"Ho memorizzato '{key}': {value}"
 
@@ -138,12 +182,13 @@ def _action_delete(store: dict, key: str) -> str:
         return f"'{key}' non è presente in memoria."
     del store[key]
     _save_store(store)
+    audit_logger.info("tool=knowledge_base action=delete key=%s", key)
 
     return f"Ho eliminato '{key}' dalla memoria."
 
 
 _ACTION_MAP = {
-    "save": lambda store, key, value: _action_save(store, key, value),
+    "save": lambda store, key, value, allow_sensitive: _action_save(store, key, value, allow_sensitive),
     "recall": lambda store, key, _value: _action_recall(store, key),
     "list": lambda store, _key, _value: _action_list(store),
     "delete": lambda store, key, _value: _action_delete(store, key),
@@ -154,9 +199,13 @@ def handler(args: dict) -> str:
     action = args.get("action", "")
     key = args.get("key", "").strip()
     value = args.get("value", "").strip()
+    allow_sensitive = bool(args.get("allow_sensitive", False))
 
     action_fn = _ACTION_MAP.get(action)
     if action_fn is None:
         return f"Azione '{action}' non riconosciuta. Usa: save, recall, list, delete."
 
-    return action_fn(_load_store(), key, value)
+    with _state.lock:
+        if action == "save":
+            return action_fn(_load_store(), key, value, allow_sensitive)
+        return action_fn(_load_store(), key, value)

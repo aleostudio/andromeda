@@ -159,7 +159,9 @@ class ConversationConfig:
 @dataclass(frozen=True)
 class ToolsConfig:
     knowledge_base_path: str = "data/knowledge.json"
+    allow_sensitive_memory: bool = False
     weather_timeout_sec: float = 10.0
+    news_timeout_sec: float = 10.0
     timer_max_sec: int = 3600
     allow_system_control: bool = True
     web_search_timeout_sec: float = 10.0

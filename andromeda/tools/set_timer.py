@@ -4,13 +4,20 @@
 import asyncio
 import logging
 import time
+from dataclasses import dataclass, field
 
 logger = logging.getLogger("[ TOOL SET TIMER ]")
+audit_logger = logging.getLogger("[ TOOL AUDIT ]")
 
 
-_feedback = None
-_max_sec: int = 3600
-_active_timers: dict[str, asyncio.Task] = {}
+@dataclass
+class _TimerState:
+    feedback: object | None = None
+    max_sec: int = 3600
+    active_timers: dict[str, asyncio.Task] = field(default_factory=dict)
+
+
+_state = _TimerState()
 
 
 DEFINITION = {
@@ -41,26 +48,30 @@ DEFINITION = {
 
 
 def configure(feedback, max_sec: int) -> None:
-    global _feedback, _max_sec
-    _feedback = feedback
-    _max_sec = max_sec
+    for task in _state.active_timers.values():
+        task.cancel()
+    _state.active_timers = {}
+    _state.feedback = feedback
+    _state.max_sec = max_sec
 
 
 async def _timer_task(timer_id: str, seconds: int, label: str) -> None:
     try:
         await asyncio.sleep(seconds)
         logger.info("Timer '%s' (%s) completed", timer_id, label)
-        if _feedback:
+        audit_logger.info("tool=set_timer event=completed timer_id=%s label=%s seconds=%d", timer_id, label, seconds)
+        if _state.feedback:
             loop = asyncio.get_running_loop()
             # Play wake sound 3 times as alarm (in executor to avoid blocking event loop)
             for _ in range(3):
-                await loop.run_in_executor(None, _feedback.play_blocking, "wake")
+                await loop.run_in_executor(None, _state.feedback.play_blocking, "wake")
                 await asyncio.sleep(0.3)
     except asyncio.CancelledError:
         logger.info("Timer '%s' cancelled", timer_id)
+        audit_logger.info("tool=set_timer event=cancelled timer_id=%s label=%s", timer_id, label)
         raise
     finally:
-        _active_timers.pop(timer_id, None)
+        _state.active_timers.pop(timer_id, None)
 
 
 def handler(args: dict) -> str:
@@ -73,12 +84,13 @@ def handler(args: dict) -> str:
     if seconds <= 0:
         return "Errore: la durata deve essere maggiore di zero."
 
-    if seconds > _max_sec:
-        return f"Errore: la durata massima è {_max_sec} secondi ({_max_sec // 60} minuti)."
+    if seconds > _state.max_sec:
+        return f"Errore: la durata massima è {_state.max_sec} secondi ({_state.max_sec // 60} minuti)."
 
     timer_id = f"{label}_{time.monotonic_ns()}"
     task = asyncio.get_running_loop().create_task(_timer_task(timer_id, seconds, label))
-    _active_timers[timer_id] = task
+    _state.active_timers[timer_id] = task
+    audit_logger.info("tool=set_timer event=created timer_id=%s label=%s seconds=%d", timer_id, label, seconds)
 
     if seconds >= 60:
         minutes = seconds // 60

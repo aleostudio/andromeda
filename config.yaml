@@ -69,7 +69,9 @@ conversation:
 
 tools:
   knowledge_base_path: "data/knowledge.json"
+  allow_sensitive_memory: false       # if true, allows storing sensitive data in persistent memory
   weather_timeout_sec: 10.0
+  news_timeout_sec: 10.0
   timer_max_sec: 3600
   web_search_timeout_sec: 10.0        # timeout HTTP per la ricerca web
   web_search_max_results: 3           # numero di risultati da restituire

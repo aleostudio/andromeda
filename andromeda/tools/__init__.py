@@ -5,7 +5,7 @@ import logging
 from andromeda.agent import AIAgent
 from andromeda.config import ToolsConfig
 from andromeda.feedback import AudioFeedback
-from andromeda.intent import register_intent
+from andromeda.intent import clear_intents, register_intent
 from andromeda.tools import (get_datetime, get_latest_news, get_weather, knowledge_base, set_timer, system_control, web_search)
 
 logger = logging.getLogger("[ TOOLS ]")
@@ -24,9 +24,11 @@ _TOOLS = [
 
 # Register all available tools with the AI agent
 def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFeedback) -> None:
+    clear_intents()
     set_timer.configure(feedback, tools_cfg.timer_max_sec)
-    knowledge_base.configure(tools_cfg.knowledge_base_path)
+    knowledge_base.configure(tools_cfg.knowledge_base_path, tools_cfg.allow_sensitive_memory)
     get_weather.configure(tools_cfg.weather_timeout_sec)
+    get_latest_news.configure(tools_cfg.news_timeout_sec)
     web_search.configure(
         tools_cfg.web_search_timeout_sec,
         tools_cfg.web_search_max_results,

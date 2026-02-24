@@ -6,6 +6,7 @@ import logging
 import platform
 
 logger = logging.getLogger("[ TOOL SYSTEM CONTROL ]")
+audit_logger = logging.getLogger("[ TOOL AUDIT ]")
 
 
 # Constants
@@ -208,18 +209,23 @@ async def handler(args: dict) -> str:
 
         if code != 0:
             logger.error("System control command failed: %s", err)
+            audit_logger.info("tool=system_control action=%s result=error", action)
             return f"Errore nell'esecuzione del comando: {err}"
 
         response = action_info.get("response")
         if response is not None:
+            audit_logger.info("tool=system_control action=%s result=ok", action)
             return response
 
         value = _extract_volume_percent(out)
+        audit_logger.info("tool=system_control action=%s result=ok", action)
 
         return f"Il volume attuale è al {value} percento."
 
     except FileNotFoundError:
+        audit_logger.info("tool=system_control action=%s result=missing_command", action)
         return f"Comando non trovato. Assicurati di avere installato {_missing_tool_hint()}."
     except Exception:
         logger.exception("System control failed for action: %s", action)
+        audit_logger.info("tool=system_control action=%s result=error", action)
         return "Errore nel controllo di sistema."

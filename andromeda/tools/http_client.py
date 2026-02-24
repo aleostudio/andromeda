@@ -2,6 +2,9 @@
 # Licensed under MIT
 
 import logging
+import asyncio
+import time
+from urllib.parse import urlparse
 import httpx
 
 logger = logging.getLogger("[ TOOL HTTP CLIENT ]")
@@ -17,6 +20,9 @@ _HEADERS = {
 }
 
 _client: httpx.AsyncClient | None = None
+_circuit_state: dict[str, dict[str, float]] = {}
+_CIRCUIT_FAIL_THRESHOLD = 3
+_CIRCUIT_OPEN_SEC = 20.0
 
 
 # Return the shared HTTP client, creating it on first use
@@ -33,10 +39,96 @@ def get_client() -> httpx.AsyncClient:
     return _client
 
 
+def _circuit_key(url: str) -> str:
+    parsed = urlparse(url)
+
+    return parsed.netloc or parsed.path
+
+
+def _is_circuit_open(key: str) -> bool:
+    state = _circuit_state.get(key)
+    if not state:
+        return False
+
+    return state.get("open_until", 0.0) > time.monotonic()
+
+
+def _mark_success(key: str) -> None:
+    if key in _circuit_state:
+        _circuit_state[key] = {"fails": 0.0, "open_until": 0.0}
+
+
+def _mark_failure(key: str) -> None:
+    state = _circuit_state.get(key, {"fails": 0.0, "open_until": 0.0})
+    fails = state["fails"] + 1.0
+    open_until = state["open_until"]
+    if fails >= _CIRCUIT_FAIL_THRESHOLD:
+        open_until = time.monotonic() + _CIRCUIT_OPEN_SEC
+        logger.warning("Circuit opened for %s", key)
+    _circuit_state[key] = {"fails": fails, "open_until": open_until}
+
+
+def _is_retryable_status(status_code: int) -> bool:
+    return status_code == 429 or status_code >= 500
+
+
+async def request_with_retry(
+    method: str,
+    url: str,
+    *,
+    params: dict | None = None,
+    timeout: float | None = None,
+    retries: int = 2,
+    backoff_sec: float = 0.25,
+) -> httpx.Response:
+    key = _circuit_key(url)
+    if _is_circuit_open(key):
+        raise RuntimeError("Circuit open")
+
+    client = get_client()
+    last_error: Exception | None = None
+
+    for attempt in range(retries + 1):
+        try:
+            response = await client.request(method, url, params=params, timeout=timeout)
+            if response.status_code >= 400:
+                error = httpx.HTTPStatusError(
+                    f"HTTP {response.status_code}",
+                    request=response.request,
+                    response=response,
+                )
+                if _is_retryable_status(response.status_code):
+                    raise error
+                _mark_success(key)
+                raise error
+
+            _mark_success(key)
+            return response
+
+        except (httpx.ConnectError, httpx.TimeoutException, httpx.NetworkError) as e:
+            last_error = e
+            _mark_failure(key)
+        except httpx.HTTPStatusError as e:
+            last_error = e
+            if _is_retryable_status(e.response.status_code):
+                _mark_failure(key)
+            else:
+                raise
+
+        if attempt < retries:
+            await asyncio.sleep(backoff_sec * (2 ** attempt))
+
+    if last_error:
+        raise last_error
+
+    raise RuntimeError("HTTP request failed")
+
+
 # Close the shared HTTP client (call on shutdown)
 async def close_client() -> None:
-    global _client
+    global _client, _circuit_state
     if _client is not None and not _client.is_closed:
         await _client.aclose()
         _client = None
         logger.debug("Shared HTTP client closed")
+    _circuit_state = {}

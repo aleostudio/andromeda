@@ -4,17 +4,23 @@
 import logging
 import time
 import httpx
-from andromeda.tools.http_client import get_client
+from dataclasses import dataclass, field
+from andromeda.tools.http_client import request_with_retry
 
 logger = logging.getLogger("[ TOOL GET WEATHER ]")
 
 
-_timeout_sec: float = 10.0
-
-# Result cache: maps city_name -> (result_str, timestamp)
-_cache: dict[str, tuple[str, float]] = {}
-_CACHE_TTL_SEC: float = 300.0  # 5 minutes
+_CACHE_TTL_SEC: float = 300.0
 _CACHE_MAX_SIZE: int = 50
+
+
+@dataclass
+class _WeatherState:
+    timeout_sec: float = 10.0
+    cache: dict[str, tuple[str, float]] = field(default_factory=dict)
+
+
+_state = _WeatherState()
 
 # WMO weather codes to Italian descriptions
 _WMO_CODES = {
@@ -65,8 +71,8 @@ DEFINITION = {
 
 
 def configure(timeout_sec: float) -> None:
-    global _timeout_sec
-    _timeout_sec = timeout_sec
+    _state.timeout_sec = timeout_sec
+    _state.cache = {}
 
 
 async def handler(args: dict) -> str:
@@ -76,7 +82,7 @@ async def handler(args: dict) -> str:
 
     # Check cache first
     cache_key = city.lower()
-    cached = _cache.get(cache_key)
+    cached = _state.cache.get(cache_key)
     if cached is not None:
         result, ts = cached
         if (time.monotonic() - ts) < _CACHE_TTL_SEC:
@@ -84,15 +90,13 @@ async def handler(args: dict) -> str:
             return result
 
     try:
-        client = get_client()
-
         # Geocode city name to coordinates
-        geo_resp = await client.get(
+        geo_resp = await request_with_retry(
+            "GET",
             "https://geocoding-api.open-meteo.com/v1/search",
             params={"name": city, "count": 1, "language": "it"},
-            timeout=_timeout_sec,
+            timeout=_state.timeout_sec,
         )
-        geo_resp.raise_for_status()
         geo_data = geo_resp.json()
 
         results = geo_data.get("results", [])
@@ -104,7 +108,8 @@ async def handler(args: dict) -> str:
         city_name = loc.get("name", city)
 
         # Fetch current weather
-        weather_resp = await client.get(
+        weather_resp = await request_with_retry(
+            "GET",
             "https://api.open-meteo.com/v1/forecast",
             params={
                 "latitude": lat,
@@ -112,9 +117,8 @@ async def handler(args: dict) -> str:
                 "current": "temperature_2m,relative_humidity_2m,weather_code,wind_speed_10m",
                 "timezone": "auto",
             },
-            timeout=_timeout_sec,
+            timeout=_state.timeout_sec,
         )
-        weather_resp.raise_for_status()
         weather_data = weather_resp.json()
         current = weather_data.get("current", {})
         temp = current.get("temperature_2m", "N/D")
@@ -131,10 +135,10 @@ async def handler(args: dict) -> str:
         )
 
         # Cache the result (evict oldest if full)
-        if len(_cache) >= _CACHE_MAX_SIZE:
-            oldest_key = min(_cache, key=lambda k: _cache[k][1])
-            del _cache[oldest_key]
-        _cache[cache_key] = (result, time.monotonic())
+        if len(_state.cache) >= _CACHE_MAX_SIZE:
+            oldest_key = min(_state.cache, key=lambda k: _state.cache[k][1])
+            del _state.cache[oldest_key]
+        _state.cache[cache_key] = (result, time.monotonic())
 
         return result
 
@@ -144,6 +148,9 @@ async def handler(args: dict) -> str:
     except httpx.TimeoutException:
         logger.error("Open-Meteo request timed out")
         return "La richiesta meteo ha impiegato troppo tempo."
+    except RuntimeError:
+        logger.error("Open-Meteo circuit breaker open")
+        return "Il servizio meteo è temporaneamente non disponibile. Riprova tra poco."
     except Exception:
         logger.exception("Weather tool failed")
         return "Errore nel recupero dei dati meteo."
