@@ -14,7 +14,7 @@ logger = logging.getLogger("[ TOOL MONGO QUERY ]")
 
 # Just as example to test the tool: move them in env vars (MONGO_URI, MONGO_DB)
 _MONGO_URI="mongodb://your_user:your_password@localhost:27017/?retryWrites=true&w=majority"
-_MONGO_DB="test"
+_MONGO_DB="your_database"
 
 
 DEFINITION = {

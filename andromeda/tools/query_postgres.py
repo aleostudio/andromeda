@@ -16,7 +16,7 @@ from psycopg.errors import Error as PsycopgError
 logger = logging.getLogger("[ TOOL POSTGRES QUERY ]")
 
 # Just as example to test the tool: move it in env var (PG_DSN)
-_PG_DSN = "postgresql://postgres:postgres@localhost:5432/postgres?sslmode=disable"
+_PG_DSN = "postgresql://your_user:your_password@localhost:5432/your_database?sslmode=disable"
 
 
 DEFINITION = {
