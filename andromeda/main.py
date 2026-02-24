@@ -155,6 +155,10 @@ class VoiceAssistant:
             raise
 
         logger.info("Voice assistant is running. Listening for wake word...")
+        try:
+            self._feedback.play("done")
+        except Exception:
+            logger.warning("Failed to play startup ready cue")
 
         try:
             await self._sm.run()

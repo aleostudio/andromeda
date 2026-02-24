@@ -149,7 +149,7 @@ class TestTTSConfig:
         assert cfg.engine == "piper"
         assert cfg.speaker_id == 0
         assert cfg.length_scale == pytest.approx(1.0)
-        assert cfg.sentence_silence == pytest.approx(0.5)
+        assert cfg.sentence_silence == pytest.approx(0.3)
 
 
 class TestWakeWordConfig:
