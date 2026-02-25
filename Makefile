@@ -14,7 +14,7 @@ dev: ## Start Andromeda
 	uv run python -m andromeda.main
 
 test: ## Run tests
-	uv run pytest tests/ -v
+	uv run --extra dev pytest tests/ -v
 
 clean: ## Clean caches
 	find . -type d -name __pycache__ -exec rm -rf {} + 2>/dev/null || true
