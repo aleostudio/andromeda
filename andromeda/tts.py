@@ -91,17 +91,15 @@ class TextToSpeech:
             case "kokoro":
                 try:
                     import os
-                    import huggingface_hub.constants as hfconst
                     from kokoro import KPipeline
                     from pathlib import Path
-                    hfconst.HF_HUB_OFFLINE = True
 
-                    # Force HuggingFace to use project-local cache and offline mode
+                    # Force HuggingFace to use project-local cache.
+                    # Do not force offline mode here: after cache cleanup we must be able
+                    # to download missing Kokoro files from the Hub.
                     hf_home = Path(__file__).resolve().parents[1] / "models/kokoro"
                     os.environ["HF_HUB_CACHE"] = str(hf_home / "hub")
                     os.environ["HF_XET_CACHE"] = str(hf_home / "xet")
-                    os.environ["HF_HUB_OFFLINE"] = "1"
-                    os.environ["TRANSFORMERS_OFFLINE"] = "1"
                     os.environ["HF_HUB_DISABLE_TELEMETRY"] = "1"
                     os.environ["HF_HUB_DISABLE_PROGRESS_BARS"] = "1"
 
