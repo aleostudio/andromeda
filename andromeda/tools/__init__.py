@@ -13,10 +13,14 @@ from andromeda.tools import (
     knowledge_base, 
     set_timer, 
     system_control, 
-    web_search, 
-    # query_mongodb,
-    # query_postgres,
+    web_search,
 )
+
+#  from andromeda.tools.experimental import (
+#     query_mongodb,
+#     query_postgres,
+#     send_telegram
+# )
 
 logger = logging.getLogger("[ TOOLS ]")
 
@@ -31,8 +35,9 @@ _TOOLS = [
     web_search,
 
     # Disabled - just for test
-    # query_mongodb,
-    # query_postgres,
+    #  query_mongodb,
+    #  query_postgres,
+    #  send_telegram,
 ]
 
 
