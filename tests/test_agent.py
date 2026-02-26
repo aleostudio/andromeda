@@ -122,6 +122,14 @@ class TestFlushClauses:
         assert remainder == ""
         assert queue.empty()
 
+    @pytest.mark.asyncio
+    async def test_clause_split_disabled_keeps_buffer(self):
+        queue = asyncio.Queue()
+        text = "Questa frase e abbastanza lunga, ma non va spezzata ora"
+        remainder = await AIAgent._flush_clauses(text, queue, enable_clause_split=False)
+        assert remainder == text
+        assert queue.empty()
+
 
 class TestFlushRemainder:
     @pytest.mark.asyncio

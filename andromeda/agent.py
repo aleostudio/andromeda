@@ -282,7 +282,7 @@ class AIAgent:
                 async for token in self._iter_tokens(response):
                     full_text += token
                     buffer += token
-                    buffer = await self._flush_clauses(buffer, sentence_queue)
+                    buffer = await self._flush_clauses(buffer, sentence_queue, enable_clause_split=self._cfg.streaming_clause_split)
         except Exception:
             logger.exception("Error during response streaming")
             if not full_text:
@@ -325,7 +325,7 @@ class AIAgent:
     # Push complete clauses from buffer to queue for lower latency TTS
     # Falls back to sentence-level splitting for short text
     @staticmethod
-    async def _flush_clauses(buffer: str, queue: asyncio.Queue) -> str:
+    async def _flush_clauses(buffer: str, queue: asyncio.Queue, enable_clause_split: bool = True) -> str:
         # First try sentence boundaries (highest quality split)
         sentences = _SENTENCE_RE.split(buffer)
         if len(sentences) > 1:
@@ -334,6 +334,9 @@ class AIAgent:
 
         # If buffer is short, keep accumulating
         if len(buffer) <= _MIN_CLAUSE_LEN * 2:
+            return buffer
+
+        if not enable_clause_split:
             return buffer
 
         # Try clause-level split for lower latency on long buffers

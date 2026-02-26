@@ -65,7 +65,7 @@ When enabled (`streaming: true` in config), Andromeda speaks **sentence-by-sente
 
 ### Clause-level streaming
 
-In streaming mode, Andromeda splits text at **clause boundaries** (commas, semicolons, colons) in addition to sentence boundaries. This produces more natural speech output with shorter time-to-first-audio, while ensuring each fragment is long enough (minimum 20 chars) to sound natural.
+In streaming mode, Andromeda can split text at **clause boundaries** (commas, semicolons, colons) in addition to sentence boundaries. This lowers time-to-first-audio, but in some contexts it can hurt prosody and intelligibility. You can toggle it with `agent.streaming_clause_split` (`true` by default).
 
 ### TTS cache and prefetch
 
@@ -199,6 +199,7 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `agent` | `model` | `llama3.1:8b` | Ollama model name |
 | `agent` | `max_tokens` | `500` | Maximum response tokens |
 | `agent` | `streaming` | `true` | Stream TTS sentence-by-sentence |
+| `agent` | `streaming_clause_split` | `true` | In streaming mode, also split long chunks on `, ; :` (disable for more natural prosody) |
 | `agent` | `prewarm` | `true` | Pre-warm LLM model at startup |
 | `tts` | `engine` | `piper` | TTS engine to use (piper - kokoro) |
 | `tts` | `piper_model_path` | `models/piper/it_IT-paola-medium.onnx` | Piper voice model, if engine=piper |

@@ -114,10 +114,15 @@ class TestAgentConfig:
         assert cfg.model == "llama3.1:8b"
         assert cfg.max_tokens == 500
         assert cfg.streaming is True
+        assert cfg.streaming_clause_split is True
 
     def test_streaming_flag(self):
         cfg = AgentConfig(streaming=False)
         assert cfg.streaming is False
+
+    def test_streaming_clause_split_flag(self):
+        cfg = AgentConfig(streaming_clause_split=False)
+        assert cfg.streaming_clause_split is False
 
     def test_system_prompt_present(self):
         cfg = AgentConfig()
@@ -233,7 +238,7 @@ class TestAppConfig:
 
     def test_from_yaml_partial(self):
         data = {
-            "agent": {"model": "mistral:7b", "streaming": True},
+            "agent": {"model": "mistral:7b", "streaming": True, "streaming_clause_split": False},
             "vad": {"aggressiveness": 2},
         }
         with tempfile.NamedTemporaryFile(
@@ -245,6 +250,7 @@ class TestAppConfig:
         cfg = AppConfig.from_yaml(path)
         assert cfg.agent.model == "mistral:7b"
         assert cfg.agent.streaming is True
+        assert cfg.agent.streaming_clause_split is False
         assert cfg.vad.aggressiveness == 2
         # Defaults preserved
         assert cfg.audio.sample_rate == 16000

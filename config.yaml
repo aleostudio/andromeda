@@ -41,6 +41,7 @@ agent:
   model: "gpt-oss:20b"
   max_tokens: 500
   streaming: true               # true = speak sentence-by-sentence as LLM generates (lower latency)
+  streaming_clause_split: false # true = split long streaming text also on , ; : (lower latency, potentially less natural prosody)
   prewarm: true                 # pre-warm model at startup to avoid cold start on first request
   system_prompt: |
     Sei un assistente vocale domestico intelligente. Ti chiami Andromeda.

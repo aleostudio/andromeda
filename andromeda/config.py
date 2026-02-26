@@ -102,6 +102,7 @@ class AgentConfig:
     max_tokens: int = 500
     timeout_sec: float = 60.0
     streaming: bool = True
+    streaming_clause_split: bool = True
     prewarm: bool = True
     system_prompt: str = (
         "Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. "
