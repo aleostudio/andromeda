@@ -244,11 +244,11 @@ The bundled `config.yaml` is tuned for faster local interaction than the conserv
 - `stt.max_no_speech_prob: 0.6`
 - `stt.min_avg_logprob: -1.0`
 - `vad.silence_timeout_sec: 0.7`
-- `vad.speech_start_timeout_sec: 1.5`
+- `vad.speech_start_timeout_sec: 2.0`
 - `vad.min_recording_sec: 0.35`
 - `vad.energy_threshold_factor: 0.8`
 - `agent.streaming_clause_split: false`
-- `conversation.follow_up_speech_start_timeout_sec: 1.5`
+- `conversation.follow_up_speech_start_timeout_sec: 2.0`
 - `conversation.barge_in_enabled: false`
 
 This keeps the core assistant fully offline after first-time model downloads, reduces endpointing delay, avoids clause-level prosody issues, and disables the experimental wake-word interruption path while barge-in is redesigned.
