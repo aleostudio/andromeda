@@ -61,7 +61,7 @@ DEFINITION = {
                     "type": "string",
                     "description": (
                         "Etichetta del timer (es. 'pasta', 'bucato'). "
-                        "Richiesta per action=set; se manca, chiedi all'utente: 'Un timer cosa?'"
+                        "Richiesta per action=set; se manca, chiedi all'utente: 'Un timer per cosa?'"
                     ),
                 },
             },
