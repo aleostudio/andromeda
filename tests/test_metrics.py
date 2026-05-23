@@ -50,6 +50,14 @@ class TestPerformanceMetrics:
         assert summary["stt"]["count"] == 1
         assert summary["stt"]["avg_ms"] > 0
 
+    def test_record_phase_duration(self):
+        metrics = PerformanceMetrics()
+        metrics.record("recording_duration", 123.4)
+
+        summary = metrics.get_summary()
+        assert summary["recording_duration"]["count"] == 1
+        assert summary["recording_duration"]["avg_ms"] == pytest.approx(123.4)
+
     def test_measure_multiple_phases(self):
         metrics = PerformanceMetrics()
         with metrics.measure("stt"):

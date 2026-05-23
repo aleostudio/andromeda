@@ -65,6 +65,7 @@ class TestVADConfig:
         cfg = VADConfig()
         assert cfg.aggressiveness == 3
         assert cfg.silence_timeout_sec == pytest.approx(1.5)
+        assert cfg.speech_start_timeout_sec == pytest.approx(3.0)
         assert cfg.speech_pad_ms == 300
         assert cfg.max_recording_sec == pytest.approx(30.0)
         assert cfg.min_recording_sec == pytest.approx(0.5)
@@ -75,10 +76,12 @@ class TestVADConfig:
         cfg = VADConfig(
             aggressiveness=2,
             silence_timeout_sec=1.5,
+            speech_start_timeout_sec=2.0,
             energy_threshold_factor=0.6,
         )
         assert cfg.aggressiveness == 2
         assert cfg.silence_timeout_sec == pytest.approx(1.5)
+        assert cfg.speech_start_timeout_sec == pytest.approx(2.0)
         assert cfg.energy_threshold_factor == pytest.approx(0.6)
 
     def test_invalid_aggressiveness(self):
@@ -88,6 +91,10 @@ class TestVADConfig:
     def test_invalid_energy_decay_rate(self):
         with pytest.raises(ValueError, match="energy_decay_rate"):
             VADConfig(energy_decay_rate=0.0)
+
+    def test_invalid_speech_start_timeout(self):
+        with pytest.raises(ValueError, match="speech_start_timeout_sec"):
+            VADConfig(speech_start_timeout_sec=0.0)
 
     def test_invalid_max_recording(self):
         with pytest.raises(ValueError, match="max_recording_sec"):
@@ -100,10 +107,21 @@ class TestSTTConfig:
         assert cfg.model_size == "medium"
         assert cfg.beam_size == 1
         assert cfg.vad_filter is False
+        assert cfg.min_audio_rms == pytest.approx(0.003)
+        assert cfg.max_no_speech_prob == pytest.approx(0.6)
+        assert cfg.min_avg_logprob == pytest.approx(-1.0)
 
     def test_invalid_beam_size(self):
         with pytest.raises(ValueError, match="beam_size"):
             STTConfig(beam_size=0)
+
+    def test_invalid_min_audio_rms(self):
+        with pytest.raises(ValueError, match="min_audio_rms"):
+            STTConfig(min_audio_rms=-0.1)
+
+    def test_invalid_max_no_speech_prob(self):
+        with pytest.raises(ValueError, match="max_no_speech_prob"):
+            STTConfig(max_no_speech_prob=1.5)
 
 
 class TestAgentConfig:
@@ -115,6 +133,7 @@ class TestAgentConfig:
         assert cfg.max_tokens == 500
         assert cfg.streaming is True
         assert cfg.streaming_clause_split is True
+        assert cfg.stream_diagnostics is True
 
     def test_streaming_flag(self):
         cfg = AgentConfig(streaming=False)
@@ -123,6 +142,10 @@ class TestAgentConfig:
     def test_streaming_clause_split_flag(self):
         cfg = AgentConfig(streaming_clause_split=False)
         assert cfg.streaming_clause_split is False
+
+    def test_stream_diagnostics_flag(self):
+        cfg = AgentConfig(stream_diagnostics=False)
+        assert cfg.stream_diagnostics is False
 
     def test_system_prompt_present(self):
         cfg = AgentConfig()
@@ -137,15 +160,29 @@ class TestConversationConfig:
     def test_defaults(self):
         cfg = ConversationConfig()
         assert cfg.follow_up_timeout_sec == pytest.approx(5.0)
+        assert cfg.follow_up_speech_start_timeout_sec == pytest.approx(1.5)
         assert cfg.history_timeout_sec == pytest.approx(300.0)
+        assert cfg.barge_in_enabled is False
 
     def test_custom_values(self):
         cfg = ConversationConfig(
             follow_up_timeout_sec=10.0,
+            follow_up_speech_start_timeout_sec=2.0,
             history_timeout_sec=0.0,
+            barge_in_enabled=True,
         )
         assert cfg.follow_up_timeout_sec == pytest.approx(10.0)
+        assert cfg.follow_up_speech_start_timeout_sec == pytest.approx(2.0)
         assert cfg.history_timeout_sec == pytest.approx(0.0)
+        assert cfg.barge_in_enabled is True
+
+    def test_invalid_follow_up_timeout(self):
+        with pytest.raises(ValueError, match="follow_up_timeout_sec"):
+            ConversationConfig(follow_up_timeout_sec=-1)
+
+    def test_invalid_follow_up_speech_start_timeout(self):
+        with pytest.raises(ValueError, match="follow_up_speech_start_timeout_sec"):
+            ConversationConfig(follow_up_speech_start_timeout_sec=0)
 
 
 class TestTTSConfig:
@@ -238,7 +275,12 @@ class TestAppConfig:
 
     def test_from_yaml_partial(self):
         data = {
-            "agent": {"model": "mistral:7b", "streaming": True, "streaming_clause_split": False},
+            "agent": {
+                "model": "mistral:7b",
+                "streaming": True,
+                "streaming_clause_split": False,
+                "stream_diagnostics": False,
+            },
             "vad": {"aggressiveness": 2},
         }
         with tempfile.NamedTemporaryFile(
@@ -251,6 +293,7 @@ class TestAppConfig:
         assert cfg.agent.model == "mistral:7b"
         assert cfg.agent.streaming is True
         assert cfg.agent.streaming_clause_split is False
+        assert cfg.agent.stream_diagnostics is False
         assert cfg.vad.aggressiveness == 2
         # Defaults preserved
         assert cfg.audio.sample_rate == 16000
@@ -261,7 +304,9 @@ class TestAppConfig:
         data = {
             "conversation": {
                 "follow_up_timeout_sec": 8.0,
+                "follow_up_speech_start_timeout_sec": 2.0,
                 "history_timeout_sec": 600.0,
+                "barge_in_enabled": True,
             },
         }
         with tempfile.NamedTemporaryFile(
@@ -272,7 +317,9 @@ class TestAppConfig:
 
         cfg = AppConfig.from_yaml(path)
         assert cfg.conversation.follow_up_timeout_sec == pytest.approx(8.0)
+        assert cfg.conversation.follow_up_speech_start_timeout_sec == pytest.approx(2.0)
         assert cfg.conversation.history_timeout_sec == pytest.approx(600.0)
+        assert cfg.conversation.barge_in_enabled is True
         Path(path).unlink()
 
     def test_from_yaml_full(self):

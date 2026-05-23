@@ -55,3 +55,38 @@ class TestPipelineIntegration:
         assert next_state == AssistantState.SPEAKING
         assistant._speak_error.assert_awaited_once_with(msg("core.generic_error_retry"))
         assert assistant._response_text == msg("core.generic_error_retry")
+
+    @pytest.mark.asyncio
+    async def test_standard_processing_does_not_monitor_interrupt_when_barge_in_disabled(self):
+        assistant = VoiceAssistant.__new__(VoiceAssistant)
+        assistant._cfg = SimpleNamespace(conversation=SimpleNamespace(barge_in_enabled=False))
+        assistant._metrics = PerformanceMetrics()
+        assistant._agent = SimpleNamespace(process=AsyncMock(return_value="risposta"))
+        assistant._tts = SimpleNamespace(speak=AsyncMock())
+        assistant._audio = SimpleNamespace(mute=MagicMock(), monitor_only=MagicMock())
+        assistant._wake_word = SimpleNamespace(reset=MagicMock())
+        assistant._monitor_interrupt = AsyncMock()
+        assistant._response_text = ""
+
+        await VoiceAssistant._process_standard(assistant, "test")
+
+        assistant._audio.mute.assert_called_once()
+        assistant._audio.monitor_only.assert_not_called()
+        assistant._wake_word.reset.assert_not_called()
+        assistant._monitor_interrupt.assert_not_called()
+
+    def test_request_shutdown_unblocks_runtime_components(self):
+        assistant = VoiceAssistant.__new__(VoiceAssistant)
+        assistant._shutdown_requested = False
+        assistant._wake_word = SimpleNamespace(shutdown=MagicMock())
+        assistant._vad = SimpleNamespace(stop=MagicMock())
+        assistant._tts = SimpleNamespace(stop_playback=MagicMock())
+        assistant._feedback = SimpleNamespace(stop=MagicMock())
+
+        VoiceAssistant.request_shutdown(assistant)
+
+        assert assistant._shutdown_requested is True
+        assistant._wake_word.shutdown.assert_called_once()
+        assistant._vad.stop.assert_called_once()
+        assistant._tts.stop_playback.assert_called_once()
+        assistant._feedback.stop.assert_called_once()

@@ -9,6 +9,7 @@ import contextlib
 import logging
 import signal
 import sys
+import time
 import webrtcvad
 from pathlib import Path
 from andromeda.agent import AIAgent
@@ -62,6 +63,7 @@ class VoiceAssistant:
         self._is_follow_up: bool = False  # True when listening for follow-up (no wake word needed)
         self._tts_interrupted: bool = False  # True when TTS was interrupted by wake word
         self._calibration_vad = webrtcvad.Vad(config.vad.aggressiveness)  # Reuse for calibration
+        self._shutdown_requested = False
 
 
     # Initialize all components. Call before run()
@@ -163,18 +165,7 @@ class VoiceAssistant:
         try:
             await self._sm.run()
         finally:
-            try:
-                self._wake_word.shutdown()
-            except Exception:
-                logger.warning("Error shutting down wake word detector")
-            try:
-                self._audio.stop()
-            except Exception:
-                logger.warning("Error stopping audio capture")
-            try:
-                await self._health.stop()
-            except Exception:
-                logger.warning("Error stopping health check")
+            await self.shutdown()
             try:
                 self._metrics.log_summary()
             except Exception:
@@ -216,10 +207,18 @@ class VoiceAssistant:
 
         # Wait for speech to end
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: self._vad.wait_for_speech_end(timeout=self._cfg.vad.max_recording_sec + 1))
+        with self._metrics.measure("vad_endpoint_wait"):
+            await loop.run_in_executor(
+                None,
+                lambda: self._vad.wait_for_speech_end(timeout=self._cfg.vad.max_recording_sec + 1),
+            )
 
         self._vad.stop()
         self._recorded_audio = self._audio.stop_recording()
+        self._metrics.record(
+            "recording_duration",
+            (len(self._recorded_audio) / self._cfg.audio.sample_rate) * 1000,
+        )
 
         # Reset energy threshold for next session
         self._vad.set_energy_threshold(0.0)
@@ -240,7 +239,15 @@ class VoiceAssistant:
     # FOLLOW-UP LISTENING: Wait briefly for user to speak without wake word
     async def _handle_follow_up_listening(self) -> AssistantState:
         follow_up_timeout = self._cfg.conversation.follow_up_timeout_sec
-        logger.info("Follow-up listening for %.1fs...", follow_up_timeout)
+        speech_start_timeout = min(
+            follow_up_timeout,
+            self._cfg.conversation.follow_up_speech_start_timeout_sec,
+        )
+        logger.info(
+            "Follow-up listening: speech_start_timeout=%.1fs, max_window=%.1fs",
+            speech_start_timeout,
+            follow_up_timeout,
+        )
 
         # Reuse last calibrated energy for VAD threshold
         if self._speech_energy > 0:
@@ -250,12 +257,20 @@ class VoiceAssistant:
         self._audio.start_recording()
         self._vad.start()
 
-        # Wait for speech end OR follow-up timeout (whichever comes first)
+        # Wait for speech start/end OR the short follow-up start timeout.
         loop = asyncio.get_running_loop()
-        await loop.run_in_executor(None, lambda: self._vad.wait_for_speech_end(timeout=follow_up_timeout))
+        with self._metrics.measure("follow_up_vad_wait"):
+            await loop.run_in_executor(
+                None,
+                lambda: self._vad.wait_for_speech_end(timeout=speech_start_timeout),
+            )
 
         self._vad.stop()
         self._recorded_audio = self._audio.stop_recording()
+        self._metrics.record(
+            "follow_up_recording_duration",
+            (len(self._recorded_audio) / self._cfg.audio.sample_rate) * 1000,
+        )
         self._vad.set_energy_threshold(0.0)
 
         # Check if user actually spoke
@@ -334,37 +349,58 @@ class VoiceAssistant:
     # Standard mode: wait for full response, then speak
     async def _process_standard(self, text: str) -> None:
         self._audio.mute()
+        llm_started_at = time.monotonic()
         self._response_text = await self._agent.process(text)
+        self._metrics.record(
+            "llm_response_ready",
+            (time.monotonic() - llm_started_at) * 1000,
+        )
 
-        # Enable wake word detection during TTS for voice interruption
-        self._wake_word.reset()
-        self._audio.monitor_only()
+        if self._cfg.conversation.barge_in_enabled:
+            self._wake_word.reset()
+            self._audio.monitor_only()
 
-        monitor_task = asyncio.create_task(self._monitor_interrupt())
+        monitor_task = (
+            asyncio.create_task(self._monitor_interrupt())
+            if self._cfg.conversation.barge_in_enabled
+            else None
+        )
         with self._metrics.measure("tts"):
             await self._tts.speak(self._response_text)
 
-        monitor_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await monitor_task
+        if monitor_task:
+            monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor_task
 
 
     # Streaming mode: speak sentence-by-sentence as LLM generates
     async def _process_streaming(self, text: str) -> None:
         sentence_queue: asyncio.Queue[str | None] = asyncio.Queue(maxsize=32)
 
-        # Enable wake word detection during TTS for voice interruption
-        self._wake_word.reset()
-        self._audio.monitor_only()
+        if self._cfg.conversation.barge_in_enabled:
+            self._wake_word.reset()
+            self._audio.monitor_only()
+        else:
+            self._audio.mute()
 
+        llm_started_at = time.monotonic()
         agent_task = asyncio.create_task(self._agent.process_streaming(text, sentence_queue))
         tts_task = asyncio.create_task(self._tts.speak_streamed(sentence_queue))
-        monitor_task = asyncio.create_task(self._monitor_interrupt(tasks_to_cancel=[agent_task]))
+        monitor_task = (
+            asyncio.create_task(self._monitor_interrupt(tasks_to_cancel=[agent_task]))
+            if self._cfg.conversation.barge_in_enabled
+            else None
+        )
 
         self._response_text = ""
         try:
             with contextlib.suppress(asyncio.CancelledError):
                 self._response_text = await agent_task
+                self._metrics.record(
+                    "llm_stream_complete",
+                    (time.monotonic() - llm_started_at) * 1000,
+                )
         except Exception:
             logger.exception("Agent streaming failed")
             # Ensure TTS gets the sentinel so it doesn't hang forever
@@ -372,9 +408,10 @@ class VoiceAssistant:
                 await sentence_queue.put(None)
 
         await tts_task
-        monitor_task.cancel()
-        with contextlib.suppress(asyncio.CancelledError):
-            await monitor_task
+        if monitor_task:
+            monitor_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await monitor_task
 
 
     # Monitor wake word during TTS playback to allow voice interruption
@@ -445,12 +482,52 @@ class VoiceAssistant:
                 logger.warning("Failed to unmute audio after error")
 
 
+    # Synchronous shutdown request used by signal handlers to unblock waiting threads.
+    def request_shutdown(self) -> None:
+        self._shutdown_requested = True
+        try:
+            self._wake_word.shutdown()
+        except Exception:
+            logger.warning("Error requesting wake word shutdown")
+        try:
+            self._vad.stop()
+        except Exception:
+            logger.warning("Error requesting VAD shutdown")
+        try:
+            self._tts.stop_playback()
+        except Exception:
+            logger.warning("Error requesting TTS shutdown")
+        try:
+            self._feedback.stop()
+        except Exception:
+            logger.warning("Error requesting feedback shutdown")
+
+
     # Release all resources. Unblocks threads waiting on events
     async def shutdown(self) -> None:
+        if self._shutdown_requested:
+            logger.debug("Completing requested shutdown")
+        self._shutdown_requested = True
         try:
             self._wake_word.shutdown()
         except Exception:
             logger.warning("Error shutting down wake word detector")
+        try:
+            self._vad.stop()
+        except Exception:
+            logger.warning("Error stopping VAD")
+        try:
+            self._tts.stop_playback()
+        except Exception:
+            logger.warning("Error stopping TTS playback")
+        try:
+            self._feedback.stop()
+        except Exception:
+            logger.warning("Error stopping audio feedback")
+        try:
+            self._audio.stop()
+        except Exception:
+            logger.warning("Error stopping audio capture")
         try:
             await self._agent.close()
         except Exception:
@@ -492,6 +569,7 @@ def main() -> None:
     def shutdown_handler() -> None:
         try:
             logger.info("Shutting down...")
+            assistant.request_shutdown()
             for task in asyncio.all_tasks(loop):
                 task.cancel()
         except Exception:
@@ -508,6 +586,8 @@ def main() -> None:
             loop.run_until_complete(assistant.run())
     finally:
         loop.run_until_complete(assistant.shutdown())
+        loop.run_until_complete(loop.shutdown_asyncgens())
+        loop.run_until_complete(loop.shutdown_default_executor())
         loop.close()
         logger.info("Voice assistant stopped")
 

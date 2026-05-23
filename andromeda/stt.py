@@ -3,10 +3,17 @@
 
 import asyncio
 import logging
+import re
 import numpy as np
 from andromeda.config import STTConfig
 
 logger = logging.getLogger("[ STT ]")
+
+_HALLUCINATION_PATTERNS = (
+    re.compile(r"\bsottotitoli\b.*\brevisione\b", re.IGNORECASE),
+    re.compile(r"\ba\s+cura\s+di\b", re.IGNORECASE),
+    re.compile(r"\bsubtitles?\s+by\b", re.IGNORECASE),
+)
 
 
 # Local speech-to-text using faster-whisper (CTranslate2)
@@ -38,6 +45,9 @@ class SpeechRecognizer:
         if audio.dtype != np.float32:
             audio = audio.astype(np.float32)
 
+        if self._is_too_quiet(audio):
+            return ""
+
         loop = asyncio.get_running_loop()
 
         return await loop.run_in_executor(None, self._transcribe_sync, audio)
@@ -59,10 +69,21 @@ class SpeechRecognizer:
             for segment in segments:
                 text = segment.text.strip()
                 if text:
+                    if self._is_low_confidence_segment(segment):
+                        logger.info(
+                            "Discarded low-confidence STT segment: text=%s no_speech=%.2f avg_logprob=%.2f",
+                            text,
+                            getattr(segment, "no_speech_prob", 0.0),
+                            getattr(segment, "avg_logprob", 0.0),
+                        )
+                        continue
                     texts.append(text)
                     logger.debug("Segment [%.1fs -> %.1fs]: %s", segment.start, segment.end, text)
 
             result = " ".join(texts)
+            if self._is_hallucinated_text(result):
+                logger.info("Discarded known STT hallucination: %s", result)
+                return ""
 
             if result:
                 logger.info("Transcription (lang=%s, prob=%.2f): %s", info.language, info.language_probability, result)
@@ -74,3 +95,30 @@ class SpeechRecognizer:
         except Exception:
             logger.exception("Transcription failed")
             return ""
+
+
+    def _is_too_quiet(self, audio: np.ndarray) -> bool:
+        rms = float(np.sqrt(np.mean(audio ** 2))) if len(audio) else 0.0
+        if rms < self._cfg.min_audio_rms:
+            logger.info("Audio too quiet for STT: rms=%.5f threshold=%.5f", rms, self._cfg.min_audio_rms)
+            return True
+
+        return False
+
+
+    def _is_low_confidence_segment(self, segment) -> bool:
+        no_speech_prob = float(getattr(segment, "no_speech_prob", 0.0) or 0.0)
+        avg_logprob = float(getattr(segment, "avg_logprob", 0.0) or 0.0)
+
+        return (
+            no_speech_prob > self._cfg.max_no_speech_prob
+            or avg_logprob < self._cfg.min_avg_logprob
+        )
+
+
+    @staticmethod
+    def _is_hallucinated_text(text: str) -> bool:
+        if not text.strip():
+            return False
+
+        return any(pattern.search(text) for pattern in _HALLUCINATION_PATTERNS)

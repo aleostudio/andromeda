@@ -49,6 +49,7 @@ class WakeWordConfig:
 class VADConfig:
     aggressiveness: int = 3
     silence_timeout_sec: float = 1.5
+    speech_start_timeout_sec: float = 3.0
     speech_pad_ms: int = 300
     max_recording_sec: float = 30.0
     min_recording_sec: float = 0.5
@@ -60,6 +61,10 @@ class VADConfig:
             raise ValueError(f"aggressiveness must be 0-3, got {self.aggressiveness}")
         if self.silence_timeout_sec <= 0:
             raise ValueError(f"silence_timeout_sec must be > 0, got {self.silence_timeout_sec}")
+        if self.speech_start_timeout_sec <= 0:
+            raise ValueError(
+                f"speech_start_timeout_sec must be > 0, got {self.speech_start_timeout_sec}"
+            )
         if self.max_recording_sec <= 0:
             raise ValueError(f"max_recording_sec must be > 0, got {self.max_recording_sec}")
         if self.energy_threshold_factor < 0:
@@ -88,10 +93,19 @@ class STTConfig:
     language: str = "it"
     beam_size: int = 1
     vad_filter: bool = False
+    min_audio_rms: float = 0.003
+    max_no_speech_prob: float = 0.6
+    min_avg_logprob: float = -1.0
 
     def __post_init__(self) -> None:
         if self.beam_size < 1:
             raise ValueError(f"beam_size must be >= 1, got {self.beam_size}")
+        if self.min_audio_rms < 0:
+            raise ValueError(f"min_audio_rms must be >= 0, got {self.min_audio_rms}")
+        if not 0.0 <= self.max_no_speech_prob <= 1.0:
+            raise ValueError(
+                f"max_no_speech_prob must be 0.0-1.0, got {self.max_no_speech_prob}"
+            )
 
 
 @dataclass(frozen=True)
@@ -103,15 +117,17 @@ class AgentConfig:
     timeout_sec: float = 60.0
     streaming: bool = True
     streaming_clause_split: bool = True
+    stream_diagnostics: bool = True
     prewarm: bool = True
     system_prompt: str = (
         "Sei un assistente vocale domestico intelligente. Ti chiami Andromeda. "
-        "Rispondi in italiano, in modo conciso e naturale. "
-        "Le tue risposte verranno lette ad alta voce, quindi "
-        "usa frasi brevi e chiare, evita formattazione "
-        "markdown, elenchi puntati, simboli speciali, "
-        "non usare abbreviazioni ambigue e quando dai numeri, "
-        "scrivi la forma parlata (es. duemila e non 2000)"
+        "Rispondi sempre in italiano con frasi brevi, naturali e adatte alla lettura vocale. "
+        "Di norma rispondi in una o due frasi. Allunga la risposta solo se l'utente lo chiede. "
+        "Evita markdown, elenchi puntati, simboli speciali e preamboli. "
+        "Quando dai numeri, usa la forma parlata. "
+        "Usa i tool solo quando servono dati aggiornati, azioni di sistema, timer, meteo o memoria. "
+        "Salva informazioni in memoria solo se l'utente chiede esplicitamente di ricordarle. "
+        "Se non sei sicura, fai una breve domanda di chiarimento invece di parlare a lungo."
     )
 
     def __post_init__(self) -> None:
@@ -152,9 +168,22 @@ class FeedbackConfig:
 @dataclass(frozen=True)
 class ConversationConfig:
     follow_up_timeout_sec: float = 5.0
+    follow_up_speech_start_timeout_sec: float = 1.5
     history_timeout_sec: float = 300.0
     max_history: int = 20
     compaction_threshold: int = 16
+    barge_in_enabled: bool = False
+
+    def __post_init__(self) -> None:
+        if self.follow_up_timeout_sec < 0:
+            raise ValueError(
+                f"follow_up_timeout_sec must be >= 0, got {self.follow_up_timeout_sec}"
+            )
+        if self.follow_up_speech_start_timeout_sec <= 0:
+            raise ValueError(
+                "follow_up_speech_start_timeout_sec must be > 0, "
+                f"got {self.follow_up_speech_start_timeout_sec}"
+            )
 
 
 @dataclass(frozen=True)

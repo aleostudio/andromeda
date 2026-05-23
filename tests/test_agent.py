@@ -157,6 +157,26 @@ class TestFlushRemainder:
         assert queue.empty()
 
 
+class TestStreamChunks:
+    @pytest.mark.asyncio
+    async def test_iter_stream_chunks_skips_invalid_json(self):
+        class Response:
+            async def aiter_lines(self):
+                for line in ['{"message":{"content":"ciao"}}', "not json", '{"done":true}']:
+                    yield line
+
+        chunks = [chunk async for chunk in AIAgent._iter_stream_chunks(Response())]
+        assert chunks == [{"message": {"content": "ciao"}}, {"done": True}]
+
+
+class TestQueuePut:
+    @pytest.mark.asyncio
+    async def test_queue_put_returns_true_on_success(self):
+        queue = asyncio.Queue()
+        assert await AIAgent._queue_put(queue, "test") is True
+        assert await queue.get() == "test"
+
+
 class TestToolRegistration:
     def test_register_tool(self):
         agent = AIAgent(AgentConfig())

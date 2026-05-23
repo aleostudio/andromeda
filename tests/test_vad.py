@@ -79,6 +79,17 @@ class TestProcessFrame:
         vad.process_frame(frame, frame_array)
         assert vad._speech_ended.is_set()
 
+    def test_speech_start_timeout(self):
+        cfg = VADConfig(speech_start_timeout_sec=0.01, max_recording_sec=10.0)
+        vad = VoiceActivityDetector(AudioConfig(), cfg)
+        vad.start()
+        time.sleep(0.02)
+        frame = _make_frame(0, 480)
+        frame_array = np.frombuffer(frame, dtype=np.int16)
+        vad.process_frame(frame, frame_array)
+        assert vad._speech_ended.is_set()
+        assert vad.had_speech is False
+
 
 class TestWaitForSpeechEnd:
     def test_returns_true_when_set(self):

@@ -14,11 +14,12 @@ wake_word:
 
 vad:
   aggressiveness: 3             # 0-3, higher = more aggressive noise filtering
-  silence_timeout_sec: 1.5
+  silence_timeout_sec: 0.7
+  speech_start_timeout_sec: 1.5 # close listening if valid speech does not start quickly
   speech_pad_ms: 300            # padding before/after speech segments
   max_recording_sec: 30
-  min_recording_sec: 0.5
-  energy_threshold_factor: 0.6  # threshold = calibrated_speech_energy * this factor
+  min_recording_sec: 0.35
+  energy_threshold_factor: 0.8  # threshold = calibrated_speech_energy * this factor
   energy_decay_rate: 0.98       # per-second decay of energy threshold
 
 noise:
@@ -28,12 +29,15 @@ noise:
 
 stt:
   engine: "faster-whisper"
-  model_size: "medium"          # tiny, base, small, medium, large-v3
+  model_size: "small"           # tiny, base, small, medium, large-v3
   device: "auto"                # auto, cpu, cuda
   compute_type: "int8"          # float16, int8 (int8 good for Apple Silicon)
   language: "it"
   beam_size: 1
   vad_filter: false             # whisper's built-in VAD for better accuracy
+  min_audio_rms: 0.003          # discard near-silent audio before Whisper to avoid hallucinations
+  max_no_speech_prob: 0.6       # discard low-confidence Whisper segments
+  min_avg_logprob: -1.0         # discard very unlikely Whisper segments
 
 agent:
   provider: "ollama"
@@ -42,15 +46,22 @@ agent:
   max_tokens: 500
   streaming: true               # true = speak sentence-by-sentence as LLM generates (lower latency)
   streaming_clause_split: false # true = split long streaming text also on , ; : (lower latency, potentially less natural prosody)
+  stream_diagnostics: true      # log stream length, first-token latency and truncation warnings
   prewarm: true                 # pre-warm model at startup to avoid cold start on first request
   system_prompt: |
     Sei un assistente vocale domestico intelligente. Ti chiami Andromeda.
-    Rispondi in italiano, in modo conciso e naturale.
+    Rispondi sempre in italiano, in modo conciso e naturale.
     Le tue risposte verranno lette ad alta voce, quindi:
     - Usa frasi brevi e chiare
+    - Di norma rispondi in una o due frasi
+    - Allunga la risposta solo se l'utente lo chiede
     - Evita formattazione markdown, elenchi puntati, simboli speciali
+    - Evita preamboli come "certo", "ecco" o "posso aiutarti"
     - Non usare abbreviazioni ambigue
     - Quando dai numeri, scrivi la forma parlata (es. "duemila" non "2000")
+    Usa i tool solo quando servono dati aggiornati, azioni di sistema, timer, meteo o memoria.
+    Salva informazioni in memoria solo se l'utente chiede esplicitamente di ricordarle.
+    Se non sei sicura, fai una breve domanda di chiarimento invece di parlare a lungo.
 
 tts:
   engine: "kokoro"              # piper - kokoro
@@ -66,7 +77,9 @@ tts:
 
 conversation:
   follow_up_timeout_sec: 5.0    # seconds to wait for follow-up after response (0 = disabled)
+  follow_up_speech_start_timeout_sec: 1.5 # max wait for speech to start during follow-up
   history_timeout_sec: 300.0    # clear conversation history after N seconds of inactivity (0 = never)
+  barge_in_enabled: false       # disabled while wake-word interruption is being redesigned
 
 tools:
   knowledge_base_path: "data/knowledge.json"

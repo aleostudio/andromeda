@@ -57,7 +57,7 @@ Mic ──▶ Buffer ──▶ Wake Word (OpenWakeWord)
 
 ### Multi-turn conversation
 
-After Andromeda responds, the assistant keeps listening for a **follow-up question** without requiring the wake word again. A configurable timeout (`follow_up_timeout_sec`) determines how long it waits before returning to idle. This enables natural, multi-turn conversations.
+After Andromeda responds, the assistant can keep listening for a **follow-up question** without requiring the wake word again. `follow_up_timeout_sec` enables or disables the follow-up window, while `follow_up_speech_start_timeout_sec` controls how quickly it gives up if no speech starts. This enables natural, multi-turn conversations without leaving the microphone open for too long.
 
 ### Streaming TTS
 
@@ -188,6 +188,7 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `wake_word` | `threshold` | `0.5` | Detection confidence (0.0 - 1.0) |
 | `vad` | `aggressiveness` | `3` | WebRTC VAD aggressiveness (0-3) |
 | `vad` | `silence_timeout_sec` | `1.5` | Seconds of silence to end recording |
+| `vad` | `speech_start_timeout_sec` | `3.0` | Seconds to wait for valid speech after wake word before closing listening |
 | `vad` | `max_recording_sec` | `30.0` | Maximum recording duration |
 | `vad` | `energy_threshold_factor` | `0.6` | Energy gate threshold multiplier |
 | `vad` | `energy_decay_rate` | `0.98` | Per-second energy threshold decay |
@@ -196,10 +197,14 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `stt` | `device` | `auto` | Compute device (auto, cpu, cuda) |
 | `stt` | `language` | `it` | Transcription language |
 | `stt` | `beam_size` | `1` | Beam search width (1 = faster, 5 = more accurate) |
+| `stt` | `min_audio_rms` | `0.003` | Discard near-silent audio before Whisper to avoid hallucinations |
+| `stt` | `max_no_speech_prob` | `0.6` | Discard Whisper segments likely to be non-speech |
+| `stt` | `min_avg_logprob` | `-1.0` | Discard very low-confidence Whisper segments |
 | `agent` | `model` | `llama3.1:8b` | Ollama model name |
 | `agent` | `max_tokens` | `500` | Maximum response tokens |
 | `agent` | `streaming` | `true` | Stream TTS sentence-by-sentence |
 | `agent` | `streaming_clause_split` | `true` | In streaming mode, also split long chunks on `, ; :` (disable for more natural prosody) |
+| `agent` | `stream_diagnostics` | `true` | Log stream length, first-token latency and truncation warnings |
 | `agent` | `prewarm` | `true` | Pre-warm LLM model at startup |
 | `tts` | `engine` | `piper` | TTS engine to use (piper - kokoro) |
 | `tts` | `piper_model_path` | `models/piper/it_IT-paola-medium.onnx` | Piper voice model, if engine=piper |
@@ -209,7 +214,9 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `tts` | `kokoro_speed` | `1.0` | Piper voice speed, if engine=kokoro |
 | `tts` | `prewarm_cache` | `true` | Pre-synthesize common error phrases at startup |
 | `conversation` | `follow_up_timeout_sec` | `5.0` | Seconds to wait for follow-up (0 = disabled) |
+| `conversation` | `follow_up_speech_start_timeout_sec` | `1.5` | Seconds to wait for speech to start during follow-up |
 | `conversation` | `history_timeout_sec` | `300.0` | Clear history after inactivity (0 = never) |
+| `conversation` | `barge_in_enabled` | `false` | Enable wake-word interruption during TTS playback (experimental) |
 | `tools` | `knowledge_base_path` | `data/knowledge.json` | Persistent memory storage path |
 | `tools` | `allow_sensitive_memory` | `false` | Allow saving sensitive entries in memory without explicit per-request opt-in |
 | `tools` | `timer_max_sec` | `3600` | Maximum timer duration in seconds |
@@ -228,6 +235,28 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 
 ---
 
+### Provided low-latency profile
+
+The bundled `config.yaml` is tuned for faster local interaction than the conservative code defaults:
+
+- `stt.model_size: small`
+- `stt.min_audio_rms: 0.003`
+- `stt.max_no_speech_prob: 0.6`
+- `stt.min_avg_logprob: -1.0`
+- `vad.silence_timeout_sec: 0.7`
+- `vad.speech_start_timeout_sec: 1.5`
+- `vad.min_recording_sec: 0.35`
+- `vad.energy_threshold_factor: 0.8`
+- `agent.streaming_clause_split: false`
+- `conversation.follow_up_speech_start_timeout_sec: 1.5`
+- `conversation.barge_in_enabled: false`
+
+This keeps the core assistant fully offline after first-time model downloads, reduces endpointing delay, avoids clause-level prosody issues, and disables the experimental wake-word interruption path while barge-in is redesigned.
+
+[↑ index](#index)
+
+---
+
 ## Run Andromeda
 
 Start **Andromeda** with:
@@ -241,6 +270,8 @@ or simply:
 ```bash
 make dev
 ```
+
+Stop the assistant with `Ctrl+C`. Shutdown is graceful: wake word waits, VAD, TTS playback, audio capture, health check and shared HTTP clients are released before the process exits.
 
 At this point, you can start to talk to **Andromeda**
 simply saying `Andromeda` on your mic. You will hear a **beep** that determines the recognition of the wake word and then you can do your question.

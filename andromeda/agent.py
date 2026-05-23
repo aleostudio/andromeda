@@ -275,20 +275,54 @@ class AIAgent:
         payload = self._build_payload(messages, stream=True)
         full_text = ""
         buffer = ""
+        token_count = 0
+        done_reason = ""
+        started_at = time.monotonic()
+        first_token_ms: float | None = None
 
         try:
             async with self._client.stream("POST", _MODEL_CHAT_PATH, json=payload) as response:
                 response.raise_for_status()
-                async for token in self._iter_tokens(response):
+                async for chunk in self._iter_stream_chunks(response):
+                    if chunk.get("done"):
+                        done_reason = str(chunk.get("done_reason") or "")
+                        continue
+
+                    token = chunk.get("message", {}).get("content", "")
+                    if not token:
+                        continue
+
+                    if first_token_ms is None:
+                        first_token_ms = (time.monotonic() - started_at) * 1000
+
+                    token_count += 1
                     full_text += token
                     buffer += token
-                    buffer = await self._flush_clauses(buffer, sentence_queue, enable_clause_split=self._cfg.streaming_clause_split)
+                    buffer = await self._flush_clauses(
+                        buffer,
+                        sentence_queue,
+                        enable_clause_split=self._cfg.streaming_clause_split,
+                    )
         except Exception:
             logger.exception("Error during response streaming")
             if not full_text:
                 raise  # Re-raise so caller sends error to queue
 
         await self._flush_remainder(buffer, sentence_queue)
+        if self._cfg.stream_diagnostics:
+            logger.info(
+                "LLM stream complete: chars=%d tokens=%d first_token_ms=%.0f done_reason=%s",
+                len(full_text),
+                token_count,
+                first_token_ms or 0,
+                done_reason or "unknown",
+            )
+        if done_reason in {"length", "stop_limit"}:
+            logger.warning(
+                "LLM stream may be truncated: done_reason=%s max_tokens=%d",
+                done_reason,
+                self._cfg.max_tokens,
+            )
 
         return full_text
 
@@ -307,19 +341,16 @@ class AIAgent:
         return payload
 
 
-    # Yield content tokens from a streaming response, skipping empty/invalid chunks
+    # Yield raw JSON chunks from a streaming response, skipping empty/invalid lines
     @staticmethod
-    async def _iter_tokens(response: httpx.Response):
+    async def _iter_stream_chunks(response: httpx.Response):
         async for line in response.aiter_lines():
             if not line.strip():
                 continue
             try:
-                chunk = json.loads(line)
+                yield json.loads(line)
             except json.JSONDecodeError:
                 continue
-            token = chunk.get("message", {}).get("content", "")
-            if token:
-                yield token
 
 
     # Push complete clauses from buffer to queue for lower latency TTS
@@ -387,11 +418,13 @@ class AIAgent:
 
 
     @staticmethod
-    async def _queue_put(queue: asyncio.Queue, value: str) -> None:
+    async def _queue_put(queue: asyncio.Queue, value: str) -> bool:
         try:
             await asyncio.wait_for(queue.put(value), timeout=_QUEUE_PUT_TIMEOUT_SEC)
+            return True
         except asyncio.TimeoutError:
-            logger.warning("Streaming queue is full, dropping chunk")
+            logger.warning("Streaming queue is full, dropping chunk: %s", value[:120])
+            return False
 
 
     # Run completion loop, handling tool calls until we get a text response
@@ -422,7 +455,15 @@ class AIAgent:
         response = await self._client.post(_MODEL_CHAT_PATH, json=payload)
         response.raise_for_status()
         try:
-            return response.json().get("message", {})
+            body = response.json()
+            done_reason = str(body.get("done_reason") or "")
+            if done_reason in {"length", "stop_limit"}:
+                logger.warning(
+                    "LLM response may be truncated: done_reason=%s max_tokens=%d",
+                    done_reason,
+                    self._cfg.max_tokens,
+                )
+            return body.get("message", {})
         except (ValueError, AttributeError):
             logger.error("Invalid JSON response from Ollama")
             return {}

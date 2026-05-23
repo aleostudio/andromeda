@@ -109,6 +109,16 @@ class VoiceActivityDetector:
                 self._is_active = False
                 return
 
+            # No speech started soon enough after the wake word.
+            if (
+                not self._speech_detected
+                and elapsed > self._vad_cfg.speech_start_timeout_sec
+            ):
+                logger.info("Speech start timeout reached (%.1fs)", elapsed)
+                self._speech_ended.set()
+                self._is_active = False
+                return
+
             # Silence timeout after speech was detected
             if self._speech_detected and silence_duration > self._vad_cfg.silence_timeout_sec:
                 logger.info("Silence timeout after %.1fs of speech (silence=%.1fs)", elapsed, silence_duration)

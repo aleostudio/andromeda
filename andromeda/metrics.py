@@ -47,10 +47,15 @@ class PerformanceMetrics:
             yield
         finally:
             duration_ms = (time.monotonic() - start) * 1000
-            if phase_name not in self._phases:
-                self._phases[phase_name] = PhaseMetric(name=phase_name)
-            self._phases[phase_name].record(duration_ms)
+            self.record(phase_name, duration_ms)
             logger.debug("[PERF] %s: %.0fms", phase_name, duration_ms)
+
+
+    # Record a measured phase duration that was calculated elsewhere
+    def record(self, phase_name: str, duration_ms: float) -> None:
+        if phase_name not in self._phases:
+            self._phases[phase_name] = PhaseMetric(name=phase_name)
+        self._phases[phase_name].record(duration_ms)
 
 
     # Mark the start of a full wake-to-response pipeline
