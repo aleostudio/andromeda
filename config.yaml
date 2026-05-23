@@ -94,6 +94,7 @@ tools:
 
 feedback:
   wake_sound: "sounds/wake.wav"
+  idle_sound: "sounds/idle.wav"
   done_sound: "sounds/done.wav"
   error_sound: "sounds/error.wav"
   thinking_sound: "sounds/thinking.wav"

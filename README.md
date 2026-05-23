@@ -217,6 +217,9 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `conversation` | `follow_up_speech_start_timeout_sec` | `1.5` | Seconds to wait for speech to start during follow-up |
 | `conversation` | `history_timeout_sec` | `300.0` | Clear history after inactivity (0 = never) |
 | `conversation` | `barge_in_enabled` | `false` | Enable wake-word interruption during TTS playback (experimental) |
+| `feedback` | `wake_sound` | `sounds/wake.wav` | Cue played when the wake word is detected |
+| `feedback` | `idle_sound` | `sounds/idle.wav` | Cue played on `LISTENING -> IDLE`; if missing, Andromeda uses the wake cue reversed |
+| `feedback` | `done_sound` | `sounds/done.wav` | Cue played when listening/processing is completed |
 | `tools` | `knowledge_base_path` | `data/knowledge.json` | Persistent memory storage path |
 | `tools` | `allow_sensitive_memory` | `false` | Allow saving sensitive entries in memory without explicit per-request opt-in |
 | `tools` | `timer_max_sec` | `3600` | Maximum timer duration in seconds |

@@ -194,6 +194,14 @@ class TestTTSConfig:
         assert cfg.sentence_silence == pytest.approx(0.3)
 
 
+class TestFeedbackConfig:
+    def test_defaults(self):
+        cfg = FeedbackConfig()
+        assert cfg.wake_sound == "sounds/wake.wav"
+        assert cfg.idle_sound == "sounds/idle.wav"
+        assert cfg.done_sound == "sounds/done.wav"
+
+
 class TestWakeWordConfig:
     def test_defaults(self):
         cfg = WakeWordConfig()

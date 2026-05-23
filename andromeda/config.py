@@ -155,6 +155,7 @@ class TTSConfig:
 @dataclass(frozen=True)
 class FeedbackConfig:
     wake_sound: str = "sounds/wake.wav"
+    idle_sound: str = "sounds/idle.wav"
     done_sound: str = "sounds/done.wav"
     error_sound: str = "sounds/error.wav"
     thinking_sound: str = "sounds/thinking.wav"

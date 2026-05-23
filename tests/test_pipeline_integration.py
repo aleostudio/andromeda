@@ -90,3 +90,29 @@ class TestPipelineIntegration:
         assistant._vad.stop.assert_called_once()
         assistant._tts.stop_playback.assert_called_once()
         assistant._feedback.stop.assert_called_once()
+
+    def test_listening_to_idle_transition_plays_idle_cue(self):
+        assistant = VoiceAssistant.__new__(VoiceAssistant)
+        assistant._shutdown_requested = False
+        assistant._feedback = SimpleNamespace(play=MagicMock())
+
+        VoiceAssistant._handle_transition(
+            assistant,
+            AssistantState.LISTENING,
+            AssistantState.IDLE,
+        )
+
+        assistant._feedback.play.assert_called_once_with("idle")
+
+    def test_shutdown_suppresses_idle_transition_cue(self):
+        assistant = VoiceAssistant.__new__(VoiceAssistant)
+        assistant._shutdown_requested = True
+        assistant._feedback = SimpleNamespace(play=MagicMock())
+
+        VoiceAssistant._handle_transition(
+            assistant,
+            AssistantState.LISTENING,
+            AssistantState.IDLE,
+        )
+
+        assistant._feedback.play.assert_not_called()

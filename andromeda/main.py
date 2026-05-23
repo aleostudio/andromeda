@@ -55,6 +55,7 @@ class VoiceAssistant:
         self._sm.register_handler(AssistantState.PROCESSING, self._handle_processing)
         self._sm.register_handler(AssistantState.SPEAKING, self._handle_speaking)
         self._sm.register_handler(AssistantState.ERROR, self._handle_error)
+        self._sm.on_transition(self._handle_transition)
 
         # Shared state between handlers
         self._recorded_audio = None
@@ -64,6 +65,15 @@ class VoiceAssistant:
         self._tts_interrupted: bool = False  # True when TTS was interrupted by wake word
         self._calibration_vad = webrtcvad.Vad(config.vad.aggressiveness)  # Reuse for calibration
         self._shutdown_requested = False
+
+
+    # Handle non-blocking side effects for state transitions
+    def _handle_transition(self, old_state: AssistantState, new_state: AssistantState) -> None:
+        if self._shutdown_requested:
+            return
+
+        if old_state == AssistantState.LISTENING and new_state == AssistantState.IDLE:
+            self._feedback.play("idle")
 
 
     # Initialize all components. Call before run()

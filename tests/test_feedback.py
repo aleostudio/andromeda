@@ -57,6 +57,7 @@ class TestInitialize:
         """Should generate synthetic tones when WAV files don't exist."""
         cfg = FeedbackConfig(
             wake_sound="nonexistent/wake.wav",
+            idle_sound="nonexistent/idle.wav",
             done_sound="nonexistent/done.wav",
             error_sound="nonexistent/error.wav",
         )
@@ -64,11 +65,23 @@ class TestInitialize:
         fb.initialize()
 
         assert "wake" in fb._sounds
+        assert "idle" in fb._sounds
         assert "done" in fb._sounds
         assert "error" in fb._sounds
         assert len(fb._sounds["wake"]) > 0
+        assert len(fb._sounds["idle"]) > 0
         assert len(fb._sounds["done"]) > 0
         assert len(fb._sounds["error"]) > 0
+
+    def test_idle_fallback_is_reversed_wake(self):
+        cfg = FeedbackConfig(
+            wake_sound="nonexistent/wake.wav",
+            idle_sound="nonexistent/idle.wav",
+        )
+        fb = AudioFeedback(AudioConfig(), cfg)
+        fb.initialize()
+
+        np.testing.assert_array_equal(fb._sounds["idle"], fb._sounds["wake"][::-1])
 
 
 class TestPlay:

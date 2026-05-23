@@ -30,6 +30,10 @@ class AudioFeedback:
     # Load or generate feedback sounds
     def initialize(self) -> None:
         self._sounds["wake"] = self._load_or_generate(self._cfg.wake_sound, self._gen_wake_tone)
+        self._sounds["idle"] = self._load_or_generate(
+            self._cfg.idle_sound,
+            lambda: self._sounds["wake"][::-1].copy(),
+        )
         self._sounds["done"] = self._load_or_generate(self._cfg.done_sound, self._gen_done_tone)
         self._sounds["error"] = self._load_or_generate(self._cfg.error_sound, self._gen_error_tone)
         self._sounds["thinking"] = self._load_or_generate(self._cfg.thinking_sound, self._gen_thinking_tone)
