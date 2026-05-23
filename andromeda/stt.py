@@ -71,8 +71,7 @@ class SpeechRecognizer:
                 if text:
                     if self._is_low_confidence_segment(segment):
                         logger.info(
-                            "Discarded low-confidence STT segment: text=%s no_speech=%.2f avg_logprob=%.2f",
-                            text,
+                            "Discarded low-confidence STT segment: no_speech=%.2f avg_logprob=%.2f",
                             getattr(segment, "no_speech_prob", 0.0),
                             getattr(segment, "avg_logprob", 0.0),
                         )
@@ -82,7 +81,7 @@ class SpeechRecognizer:
 
             result = " ".join(texts)
             if self._is_hallucinated_text(result):
-                logger.info("Discarded known STT hallucination: %s", result)
+                logger.info("Discarded known STT hallucination")
                 return ""
 
             if result:

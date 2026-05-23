@@ -15,11 +15,14 @@ wake_word:
 vad:
   aggressiveness: 3             # 0-3, higher = more aggressive noise filtering
   silence_timeout_sec: 0.7
-  speech_start_timeout_sec: 2.0 # close listening if valid speech does not start quickly
+  speech_start_timeout_sec: 3.0 # close listening if valid speech does not start quickly
+  speech_start_min_frames: 2    # require consecutive speech frames before accepting speech start
   speech_pad_ms: 300            # padding before/after speech segments
   max_recording_sec: 30
   min_recording_sec: 0.35
-  energy_threshold_factor: 0.8  # threshold = calibrated_speech_energy * this factor
+  min_speech_duration_sec: 0.18 # reject very short speech bursts before STT
+  energy_threshold_factor: 0.65 # threshold = calibrated_speech_energy * this factor
+  noise_energy_threshold_factor: 2.5 # threshold also considers background noise floor
   energy_decay_rate: 0.98       # per-second decay of energy threshold
 
 noise:
@@ -79,7 +82,11 @@ conversation:
   follow_up_timeout_sec: 5.0    # seconds to wait for follow-up after response (0 = disabled)
   follow_up_speech_start_timeout_sec: 2.0 # max wait for speech to start during follow-up
   history_timeout_sec: 300.0    # clear conversation history after N seconds of inactivity (0 = never)
-  barge_in_enabled: false       # disabled while wake-word interruption is being redesigned
+  speak_empty_transcription_errors: false # return to idle silently when STT produces no text
+  barge_in_enabled: true        # allow wake word to interrupt TTS playback
+  barge_in_min_tts_sec: 0.8     # ignore detections right as TTS starts to reduce echo false positives
+  barge_in_poll_timeout_sec: 0.25
+  barge_in_reset_interval: 8    # reset wake model periodically while monitoring TTS
 
 tools:
   knowledge_base_path: "data/knowledge.json"

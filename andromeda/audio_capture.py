@@ -124,22 +124,7 @@ class AudioCapture:
 
     # Analyze ring buffer to estimate current speech RMS energy
     def calibrate_speech_energy(self, vad, sample_rate: int) -> float:
-        with self._lock:
-            frames = list(self._ring_buffer)
-
-        if not frames:
-            return 0.0
-
-        speech_energies = []
-        for frame_bytes in frames:
-            try:
-                if vad.is_speech(frame_bytes, sample_rate=sample_rate):
-                    audio = np.frombuffer(frame_bytes, dtype=np.int16)
-                    rms = float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
-                    speech_energies.append(rms)
-            except Exception:
-                continue
-
+        speech_energies = self._collect_ring_energies(vad, sample_rate, want_speech=True)
         if not speech_energies:
             return 0.0
 
@@ -147,6 +132,38 @@ class AudioCapture:
         logger.debug("Calibration: %d speech frames, median RMS=%.1f", len(speech_energies), median_energy)
 
         return median_energy
+
+
+    # Analyze ring buffer to estimate non-speech background RMS energy
+    def calibrate_noise_energy(self, vad, sample_rate: int) -> float:
+        noise_energies = self._collect_ring_energies(vad, sample_rate, want_speech=False)
+        if not noise_energies:
+            return 0.0
+
+        median_energy = float(np.median(noise_energies))
+        logger.debug("Calibration: %d noise frames, median RMS=%.1f", len(noise_energies), median_energy)
+
+        return median_energy
+
+
+    def _collect_ring_energies(self, vad, sample_rate: int, *, want_speech: bool) -> list[float]:
+        with self._lock:
+            frames = list(self._ring_buffer)
+
+        energies = []
+        for frame_bytes in frames:
+            try:
+                is_speech = vad.is_speech(frame_bytes, sample_rate=sample_rate)
+                if is_speech != want_speech:
+                    continue
+
+                audio = np.frombuffer(frame_bytes, dtype=np.int16)
+                rms = float(np.sqrt(np.mean(audio.astype(np.float32) ** 2)))
+                energies.append(rms)
+            except Exception:
+                continue
+
+        return energies
 
 
     # Sounddevice callback - runs in separate thread

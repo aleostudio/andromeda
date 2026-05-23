@@ -13,7 +13,10 @@ from andromeda.state_machine import AssistantState
 
 def _build_assistant_for_processing(streaming: bool = False) -> VoiceAssistant:
     assistant = VoiceAssistant.__new__(VoiceAssistant)
-    assistant._cfg = SimpleNamespace(agent=SimpleNamespace(streaming=streaming))
+    assistant._cfg = SimpleNamespace(
+        agent=SimpleNamespace(streaming=streaming),
+        conversation=SimpleNamespace(speak_empty_transcription_errors=False),
+    )
     assistant._metrics = PerformanceMetrics()
     assistant._recorded_audio = np.array([0.1, 0.2], dtype=np.float32)
     assistant._stt = SimpleNamespace(transcribe=AsyncMock(return_value="test input"))
@@ -29,7 +32,65 @@ def _build_assistant_for_processing(streaming: bool = False) -> VoiceAssistant:
     return assistant
 
 
+def _build_assistant_for_listening() -> VoiceAssistant:
+    assistant = VoiceAssistant.__new__(VoiceAssistant)
+    assistant._cfg = SimpleNamespace(
+        audio=SimpleNamespace(sample_rate=16000),
+        vad=SimpleNamespace(max_recording_sec=30.0, min_recording_sec=0.35, min_speech_duration_sec=0.18),
+    )
+    assistant._metrics = PerformanceMetrics()
+    assistant._is_follow_up = False
+    assistant._audio = SimpleNamespace(
+        start_recording=MagicMock(),
+        stop_recording=MagicMock(return_value=np.array([], dtype=np.float32)),
+    )
+    assistant._vad = SimpleNamespace(
+        start=MagicMock(),
+        wait_for_speech_end=MagicMock(return_value=True),
+        stop=MagicMock(),
+        set_energy_threshold=MagicMock(),
+        had_speech=False,
+        end_reason="speech_start_timeout",
+        speech_duration_sec=0.0,
+        stats={},
+    )
+    assistant._speak_error = AsyncMock()
+    assistant._feedback = SimpleNamespace(play=MagicMock())
+
+    return assistant
+
+
 class TestPipelineIntegration:
+    @pytest.mark.asyncio
+    async def test_listening_speech_start_timeout_returns_idle_without_spoken_error(self):
+        assistant = _build_assistant_for_listening()
+
+        next_state = await VoiceAssistant._handle_listening(assistant, AssistantState.LISTENING)
+
+        assert next_state == AssistantState.IDLE
+        assistant._speak_error.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_transcription_returns_idle_without_spoken_error(self):
+        assistant = _build_assistant_for_processing(streaming=False)
+        assistant._stt.transcribe = AsyncMock(return_value="")
+
+        next_state = await VoiceAssistant._handle_processing(assistant, AssistantState.PROCESSING)
+
+        assert next_state == AssistantState.IDLE
+        assistant._speak_error.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_empty_transcription_can_speak_error_when_enabled(self):
+        assistant = _build_assistant_for_processing(streaming=False)
+        assistant._cfg.conversation.speak_empty_transcription_errors = True
+        assistant._stt.transcribe = AsyncMock(return_value="")
+
+        next_state = await VoiceAssistant._handle_processing(assistant, AssistantState.PROCESSING)
+
+        assert next_state == AssistantState.SPEAKING
+        assistant._speak_error.assert_awaited_once_with(msg("core.not_understood_retry"))
+
     @pytest.mark.asyncio
     async def test_processing_fast_intent_path(self):
         assistant = _build_assistant_for_processing(streaming=False)
@@ -116,3 +177,27 @@ class TestPipelineIntegration:
         )
 
         assistant._feedback.play.assert_not_called()
+
+    @pytest.mark.asyncio
+    async def test_monitor_interrupt_stops_tts_on_wake_detection(self):
+        assistant = VoiceAssistant.__new__(VoiceAssistant)
+        assistant._cfg = SimpleNamespace(
+            conversation=SimpleNamespace(
+                barge_in_min_tts_sec=0.0,
+                barge_in_poll_timeout_sec=0.01,
+                barge_in_reset_interval=8,
+            ),
+        )
+        assistant._wake_word = SimpleNamespace(
+            wait_for_detection=MagicMock(return_value=True),
+            reset_model_only=MagicMock(),
+        )
+        assistant._tts = SimpleNamespace(stop_playback=MagicMock())
+        assistant._tts_interrupted = False
+        task_to_cancel = MagicMock()
+
+        await VoiceAssistant._monitor_interrupt(assistant, tasks_to_cancel=[task_to_cancel])
+
+        assert assistant._tts_interrupted is True
+        assistant._tts.stop_playback.assert_called_once()
+        task_to_cancel.cancel.assert_called_once()

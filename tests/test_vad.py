@@ -89,6 +89,38 @@ class TestProcessFrame:
         vad.process_frame(frame, frame_array)
         assert vad._speech_ended.is_set()
         assert vad.had_speech is False
+        assert vad.end_reason == "speech_start_timeout"
+
+    def test_requires_consecutive_speech_frames(self):
+        cfg = VADConfig(speech_start_min_frames=3)
+        vad = VoiceActivityDetector(AudioConfig(), cfg)
+        vad._vad.is_speech = lambda _frame, sample_rate: True
+        vad.start()
+        frame = _make_loud_frame()
+        frame_array = np.frombuffer(frame, dtype=np.int16)
+
+        vad.process_frame(frame, frame_array)
+        vad.process_frame(frame, frame_array)
+        assert vad.had_speech is False
+
+        vad.process_frame(frame, frame_array)
+        assert vad.had_speech is True
+
+    def test_energy_gate_rejects_low_energy_speech(self):
+        cfg = VADConfig(speech_start_min_frames=1)
+        vad = VoiceActivityDetector(AudioConfig(), cfg)
+        vad._vad.is_speech = lambda _frame, sample_rate: True
+        vad.set_energy_threshold(1000.0)
+        vad.start()
+        frame = _make_frame(10)
+        frame_array = np.frombuffer(frame, dtype=np.int16)
+
+        vad.process_frame(frame, frame_array)
+
+        assert vad.had_speech is False
+        assert vad.stats["energy_rejected_frames"] == 1
+        assert vad.stats["speech_frames"] == 0
+        assert vad.stats["end_reason"] == "active"
 
 
 class TestWaitForSpeechEnd:
@@ -114,6 +146,22 @@ class TestHadSpeech:
         vad = VoiceActivityDetector(AudioConfig(), VADConfig())
         vad.start()
         assert vad.had_speech is False
+
+
+class TestSpeechDuration:
+    def test_speech_duration_counts_accepted_frames(self):
+        cfg = VADConfig(speech_start_min_frames=1)
+        vad = VoiceActivityDetector(AudioConfig(), cfg)
+        vad._vad.is_speech = lambda _frame, sample_rate: True
+        vad.start()
+        frame = _make_loud_frame()
+        frame_array = np.frombuffer(frame, dtype=np.int16)
+
+        vad.process_frame(frame, frame_array)
+        vad.process_frame(frame, frame_array)
+
+        assert vad.speech_duration_sec == pytest.approx(0.06)
+        assert vad.stats["speech_duration_sec"] == pytest.approx(0.06)
 
 
 class TestDuration:

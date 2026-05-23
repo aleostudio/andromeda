@@ -168,3 +168,24 @@ class TestCalibrateSpeechEnergy:
 
         energy = cap.calibrate_speech_energy(mock_vad, 16000)
         assert energy > 0.0
+
+    def test_noise_energy_uses_non_speech_frames(self):
+        cap = AudioCapture(AudioConfig(), NoiseConfig(enabled=False))
+        mock_vad = MagicMock()
+        mock_vad.is_speech.return_value = False
+
+        frame = struct.pack("<480h", *([500] * 480))
+        cap._ring_buffer.append(frame)
+
+        energy = cap.calibrate_noise_energy(mock_vad, 16000)
+        assert energy > 0.0
+
+    def test_noise_energy_ignores_speech_frames(self):
+        cap = AudioCapture(AudioConfig(), NoiseConfig(enabled=False))
+        mock_vad = MagicMock()
+        mock_vad.is_speech.return_value = True
+
+        frame = struct.pack("<480h", *([500] * 480))
+        cap._ring_buffer.append(frame)
+
+        assert cap.calibrate_noise_energy(mock_vad, 16000) == 0.0

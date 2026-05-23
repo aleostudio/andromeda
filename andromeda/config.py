@@ -50,10 +50,13 @@ class VADConfig:
     aggressiveness: int = 3
     silence_timeout_sec: float = 1.5
     speech_start_timeout_sec: float = 3.0
+    speech_start_min_frames: int = 3
     speech_pad_ms: int = 300
     max_recording_sec: float = 30.0
     min_recording_sec: float = 0.5
+    min_speech_duration_sec: float = 0.25
     energy_threshold_factor: float = 0.6
+    noise_energy_threshold_factor: float = 3.0
     energy_decay_rate: float = 0.98
 
     def __post_init__(self) -> None:
@@ -65,10 +68,23 @@ class VADConfig:
             raise ValueError(
                 f"speech_start_timeout_sec must be > 0, got {self.speech_start_timeout_sec}"
             )
+        if self.speech_start_min_frames < 1:
+            raise ValueError(
+                f"speech_start_min_frames must be >= 1, got {self.speech_start_min_frames}"
+            )
         if self.max_recording_sec <= 0:
             raise ValueError(f"max_recording_sec must be > 0, got {self.max_recording_sec}")
+        if self.min_speech_duration_sec < 0:
+            raise ValueError(
+                f"min_speech_duration_sec must be >= 0, got {self.min_speech_duration_sec}"
+            )
         if self.energy_threshold_factor < 0:
             raise ValueError(f"energy_threshold_factor must be >= 0, got {self.energy_threshold_factor}")
+        if self.noise_energy_threshold_factor < 0:
+            raise ValueError(
+                "noise_energy_threshold_factor must be >= 0, "
+                f"got {self.noise_energy_threshold_factor}"
+            )
         if not 0.0 < self.energy_decay_rate <= 1.0:
             raise ValueError(f"energy_decay_rate must be (0, 1], got {self.energy_decay_rate}")
 
@@ -173,7 +189,11 @@ class ConversationConfig:
     history_timeout_sec: float = 300.0
     max_history: int = 20
     compaction_threshold: int = 16
+    speak_empty_transcription_errors: bool = False
     barge_in_enabled: bool = False
+    barge_in_min_tts_sec: float = 0.8
+    barge_in_poll_timeout_sec: float = 0.25
+    barge_in_reset_interval: int = 8
 
     def __post_init__(self) -> None:
         if self.follow_up_timeout_sec < 0:
@@ -184,6 +204,19 @@ class ConversationConfig:
             raise ValueError(
                 "follow_up_speech_start_timeout_sec must be > 0, "
                 f"got {self.follow_up_speech_start_timeout_sec}"
+            )
+        if self.barge_in_min_tts_sec < 0:
+            raise ValueError(
+                f"barge_in_min_tts_sec must be >= 0, got {self.barge_in_min_tts_sec}"
+            )
+        if self.barge_in_poll_timeout_sec <= 0:
+            raise ValueError(
+                "barge_in_poll_timeout_sec must be > 0, "
+                f"got {self.barge_in_poll_timeout_sec}"
+            )
+        if self.barge_in_reset_interval < 1:
+            raise ValueError(
+                f"barge_in_reset_interval must be >= 1, got {self.barge_in_reset_interval}"
             )
 
 

@@ -197,9 +197,17 @@ class VoiceAssistant:
 
             # Calibrate speech energy from the ring buffer audio
             self._speech_energy = self._audio.calibrate_speech_energy(self._calibration_vad, self._cfg.audio.sample_rate)
-            energy_threshold = self._speech_energy * self._cfg.vad.energy_threshold_factor
+            noise_energy = self._audio.calibrate_noise_energy(self._calibration_vad, self._cfg.audio.sample_rate)
+            speech_threshold = self._speech_energy * self._cfg.vad.energy_threshold_factor
+            noise_threshold = noise_energy * self._cfg.vad.noise_energy_threshold_factor
+            energy_threshold = max(speech_threshold, noise_threshold)
             self._vad.set_energy_threshold(energy_threshold)
-            logger.info("Calibrated speech energy: %.1f, VAD energy threshold: %.1f", self._speech_energy, energy_threshold)
+            logger.info(
+                "Calibrated energy: speech=%.1f noise=%.1f threshold=%.1f",
+                self._speech_energy,
+                noise_energy,
+                energy_threshold,
+            )
             self._feedback.play("wake")
 
             return AssistantState.LISTENING
@@ -229,13 +237,23 @@ class VoiceAssistant:
             "recording_duration",
             (len(self._recorded_audio) / self._cfg.audio.sample_rate) * 1000,
         )
+        self._metrics.record("vad_speech_duration", self._vad.speech_duration_sec * 1000)
+        logger.info("VAD stats: %s", self._vad.stats)
 
         # Reset energy threshold for next session
         self._vad.set_energy_threshold(0.0)
 
         # Check minimum recording
         min_samples = int(self._cfg.vad.min_recording_sec * self._cfg.audio.sample_rate)
-        if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
+        if not self._vad.had_speech and self._vad.end_reason == "speech_start_timeout":
+            logger.info("No speech started after wake word, returning to IDLE")
+            return AssistantState.IDLE
+
+        if (
+            len(self._recorded_audio) < min_samples
+            or not self._vad.had_speech
+            or self._vad.speech_duration_sec < self._cfg.vad.min_speech_duration_sec
+        ):
             logger.info("Recording too short or no speech detected, asking user to retry")
             await self._speak_error(msg("core.no_speech_retry"))
 
@@ -281,11 +299,22 @@ class VoiceAssistant:
             "follow_up_recording_duration",
             (len(self._recorded_audio) / self._cfg.audio.sample_rate) * 1000,
         )
+        self._metrics.record("follow_up_vad_speech_duration", self._vad.speech_duration_sec * 1000)
+        logger.info("Follow-up VAD stats: %s", self._vad.stats)
         self._vad.set_energy_threshold(0.0)
 
         # Check if user actually spoke
         min_samples = int(self._cfg.vad.min_recording_sec * self._cfg.audio.sample_rate)
-        if len(self._recorded_audio) < min_samples or not self._vad.had_speech:
+        if not self._vad.had_speech and self._vad.end_reason == "speech_start_timeout":
+            logger.info("No follow-up speech started, back to IDLE")
+            self._is_follow_up = False
+            return AssistantState.IDLE
+
+        if (
+            len(self._recorded_audio) < min_samples
+            or not self._vad.had_speech
+            or self._vad.speech_duration_sec < self._cfg.vad.min_speech_duration_sec
+        ):
             logger.info("No follow-up detected, back to IDLE")
             self._is_follow_up = False
 
@@ -305,10 +334,12 @@ class VoiceAssistant:
             text = await self._stt.transcribe(self._recorded_audio)
 
         if not text.strip():
-            logger.info("Empty transcription, asking user to repeat")
-            await self._speak_error(msg("core.not_understood_retry"))
+            logger.info("Empty transcription, returning to IDLE")
+            if self._cfg.conversation.speak_empty_transcription_errors:
+                await self._speak_error(msg("core.not_understood_retry"))
+                return AssistantState.SPEAKING
 
-            return AssistantState.SPEAKING
+            return AssistantState.IDLE
 
         logger.info("User said: %s", text)
 
@@ -427,15 +458,27 @@ class VoiceAssistant:
     # Monitor wake word during TTS playback to allow voice interruption
     async def _monitor_interrupt(self, tasks_to_cancel: list[asyncio.Task] | None = None) -> None:
         loop = asyncio.get_running_loop()
-        logger.debug("Interrupt monitoring active")
+        cfg = self._cfg.conversation
+        logger.info(
+            "Barge-in monitor active: min_tts_sec=%.1f poll=%.2f reset_interval=%d",
+            cfg.barge_in_min_tts_sec,
+            cfg.barge_in_poll_timeout_sec,
+            cfg.barge_in_reset_interval,
+        )
+        if cfg.barge_in_min_tts_sec > 0:
+            await asyncio.sleep(cfg.barge_in_min_tts_sec)
+
         poll_count = 0
 
         while True:
             detected = await loop.run_in_executor(
-                None, lambda: self._wake_word.wait_for_detection(timeout=0.5),
+                None,
+                lambda: self._wake_word.wait_for_detection(
+                    timeout=cfg.barge_in_poll_timeout_sec,
+                ),
             )
             if detected:
-                logger.info("Interrupt: wake word detected during speech")
+                logger.info("Barge-in: wake word detected during TTS")
                 self._tts.stop_playback()
                 self._tts_interrupted = True
                 if tasks_to_cancel:
@@ -446,7 +489,7 @@ class VoiceAssistant:
             # Periodically reset wake word model to prevent state accumulation
             # from TTS audio echo picked up by the microphone
             poll_count += 1
-            if poll_count % 10 == 0:
+            if poll_count % cfg.barge_in_reset_interval == 0:
                 self._wake_word.reset_model_only()
                 logger.debug("Interrupt monitor: model reset (poll %d)", poll_count)
 

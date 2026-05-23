@@ -25,6 +25,11 @@ class VoiceActivityDetector:
         self._speech_detected = False
         self._last_speech_time: float = 0.0
         self._start_time: float = 0.0
+        self._consecutive_speech_frames = 0
+        self._speech_frame_count = 0
+        self._total_frame_count = 0
+        self._energy_rejected_frame_count = 0
+        self._end_reason: str | None = None
 
         # Adaptive energy gate
         self._energy_threshold: float = 0.0
@@ -52,6 +57,11 @@ class VoiceActivityDetector:
             self._last_speech_time = time.monotonic()
             self._start_time = time.monotonic()
             self._last_decay_time = time.monotonic()
+            self._consecutive_speech_frames = 0
+            self._speech_frame_count = 0
+            self._total_frame_count = 0
+            self._energy_rejected_frame_count = 0
+            self._end_reason = None
             self._speech_ended.clear()
 
         logger.debug("VAD monitoring started")
@@ -61,6 +71,8 @@ class VoiceActivityDetector:
     def stop(self) -> None:
         with self._lock:
             self._is_active = False
+            if self._end_reason is None:
+                self._end_reason = "stopped"
             self._speech_ended.set()
 
 
@@ -80,12 +92,16 @@ class VoiceActivityDetector:
                 rms = float(np.sqrt(np.mean(frame_array.astype(np.float32) ** 2)))
                 if rms < self._energy_threshold:
                     is_speech = False
+                    with self._lock:
+                        self._energy_rejected_frame_count += 1
             except Exception:
                 pass  # Never crash the audio callback
 
         now = time.monotonic()
 
         with self._lock:
+            self._total_frame_count += 1
+
             # Apply energy decay over time so threshold adapts downward
             if self._energy_threshold > 0.0:
                 elapsed_since_decay = now - self._last_decay_time
@@ -95,8 +111,18 @@ class VoiceActivityDetector:
                     self._last_decay_time = now
 
             if is_speech:
-                self._speech_detected = True
-                self._last_speech_time = now
+                self._consecutive_speech_frames += 1
+                self._speech_frame_count += 1
+                if self._consecutive_speech_frames >= self._vad_cfg.speech_start_min_frames:
+                    if not self._speech_detected:
+                        logger.debug(
+                            "Speech confirmed after %d consecutive frames",
+                            self._consecutive_speech_frames,
+                        )
+                    self._speech_detected = True
+                    self._last_speech_time = now
+            else:
+                self._consecutive_speech_frames = 0
 
             # Check conditions for ending
             elapsed = now - self._start_time
@@ -105,6 +131,7 @@ class VoiceActivityDetector:
             # Max recording time exceeded
             if elapsed > self._vad_cfg.max_recording_sec:
                 logger.info("Max recording time reached (%.1fs)", elapsed)
+                self._end_reason = "max_recording"
                 self._speech_ended.set()
                 self._is_active = False
                 return
@@ -115,6 +142,7 @@ class VoiceActivityDetector:
                 and elapsed > self._vad_cfg.speech_start_timeout_sec
             ):
                 logger.info("Speech start timeout reached (%.1fs)", elapsed)
+                self._end_reason = "speech_start_timeout"
                 self._speech_ended.set()
                 self._is_active = False
                 return
@@ -122,6 +150,7 @@ class VoiceActivityDetector:
             # Silence timeout after speech was detected
             if self._speech_detected and silence_duration > self._vad_cfg.silence_timeout_sec:
                 logger.info("Silence timeout after %.1fs of speech (silence=%.1fs)", elapsed, silence_duration)
+                self._end_reason = "silence_timeout"
                 self._speech_ended.set()
                 self._is_active = False
 
@@ -136,6 +165,35 @@ class VoiceActivityDetector:
     def had_speech(self) -> bool:
         with self._lock:
             return self._speech_detected
+
+
+    # Approximate accepted speech duration based on VAD frames
+    @property
+    def speech_duration_sec(self) -> float:
+        with self._lock:
+            return self._speech_frame_count * (self._audio_cfg.chunk_ms / 1000)
+
+
+    # VAD diagnostics for tuning noisy-room behavior
+    @property
+    def stats(self) -> dict[str, int | float]:
+        with self._lock:
+            return {
+                "total_frames": self._total_frame_count,
+                "speech_frames": self._speech_frame_count,
+                "energy_rejected_frames": self._energy_rejected_frame_count,
+                "end_reason": self._end_reason or "active",
+                "speech_duration_sec": round(
+                    self._speech_frame_count * (self._audio_cfg.chunk_ms / 1000),
+                    3,
+                ),
+            }
+
+
+    @property
+    def end_reason(self) -> str | None:
+        with self._lock:
+            return self._end_reason
 
 
     # Duration of current/last monitoring session

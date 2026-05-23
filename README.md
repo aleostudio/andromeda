@@ -189,8 +189,11 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `vad` | `aggressiveness` | `3` | WebRTC VAD aggressiveness (0-3) |
 | `vad` | `silence_timeout_sec` | `1.5` | Seconds of silence to end recording |
 | `vad` | `speech_start_timeout_sec` | `3.0` | Seconds to wait for valid speech after wake word before closing listening |
+| `vad` | `speech_start_min_frames` | `3` | Consecutive accepted speech frames required before speech start is confirmed |
 | `vad` | `max_recording_sec` | `30.0` | Maximum recording duration |
+| `vad` | `min_speech_duration_sec` | `0.25` | Minimum accepted speech duration required before sending audio to STT |
 | `vad` | `energy_threshold_factor` | `0.6` | Energy gate threshold multiplier |
+| `vad` | `noise_energy_threshold_factor` | `3.0` | Background noise floor multiplier used for the VAD energy threshold |
 | `vad` | `energy_decay_rate` | `0.98` | Per-second energy threshold decay |
 | `noise` | `enabled` | `false` | Enable noise reduction on recordings |
 | `stt` | `model_size` | `medium` | Whisper model (tiny, base, small, medium, large-v3) |
@@ -216,7 +219,11 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `conversation` | `follow_up_timeout_sec` | `5.0` | Seconds to wait for follow-up (0 = disabled) |
 | `conversation` | `follow_up_speech_start_timeout_sec` | `1.5` | Seconds to wait for speech to start during follow-up |
 | `conversation` | `history_timeout_sec` | `300.0` | Clear history after inactivity (0 = never) |
+| `conversation` | `speak_empty_transcription_errors` | `false` | Speak a retry message when STT returns no text; disabled for quieter noisy-room behavior |
 | `conversation` | `barge_in_enabled` | `false` | Enable wake-word interruption during TTS playback (experimental) |
+| `conversation` | `barge_in_min_tts_sec` | `0.8` | Ignore wake detections just after TTS starts to reduce echo false positives |
+| `conversation` | `barge_in_poll_timeout_sec` | `0.25` | Poll interval for wake-word interruption while TTS is playing |
+| `conversation` | `barge_in_reset_interval` | `8` | Wake model reset interval while monitoring TTS playback |
 | `feedback` | `wake_sound` | `sounds/wake.wav` | Cue played when the wake word is detected |
 | `feedback` | `idle_sound` | `sounds/idle.wav` | Cue played on `LISTENING -> IDLE`; if missing, Andromeda uses the wake cue reversed |
 | `feedback` | `done_sound` | `sounds/done.wav` | Cue played when listening/processing is completed |
@@ -247,14 +254,21 @@ The bundled `config.yaml` is tuned for faster local interaction than the conserv
 - `stt.max_no_speech_prob: 0.6`
 - `stt.min_avg_logprob: -1.0`
 - `vad.silence_timeout_sec: 0.7`
-- `vad.speech_start_timeout_sec: 2.0`
+- `vad.speech_start_timeout_sec: 3.0`
+- `vad.speech_start_min_frames: 2`
 - `vad.min_recording_sec: 0.35`
-- `vad.energy_threshold_factor: 0.8`
+- `vad.min_speech_duration_sec: 0.18`
+- `vad.energy_threshold_factor: 0.65`
+- `vad.noise_energy_threshold_factor: 2.5`
 - `agent.streaming_clause_split: false`
+- `conversation.speak_empty_transcription_errors: false`
 - `conversation.follow_up_speech_start_timeout_sec: 2.0`
-- `conversation.barge_in_enabled: false`
+- `conversation.barge_in_enabled: true`
+- `conversation.barge_in_min_tts_sec: 0.8`
+- `conversation.barge_in_poll_timeout_sec: 0.25`
+- `conversation.barge_in_reset_interval: 8`
 
-This keeps the core assistant fully offline after first-time model downloads, reduces endpointing delay, avoids clause-level prosody issues, and disables the experimental wake-word interruption path while barge-in is redesigned.
+This keeps the core assistant fully offline after first-time model downloads, reduces endpointing delay, avoids clause-level prosody issues, and enables a guarded wake-word interruption path during TTS playback.
 
 [↑ index](#index)
 

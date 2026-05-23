@@ -66,10 +66,13 @@ class TestVADConfig:
         assert cfg.aggressiveness == 3
         assert cfg.silence_timeout_sec == pytest.approx(1.5)
         assert cfg.speech_start_timeout_sec == pytest.approx(3.0)
+        assert cfg.speech_start_min_frames == 3
         assert cfg.speech_pad_ms == 300
         assert cfg.max_recording_sec == pytest.approx(30.0)
         assert cfg.min_recording_sec == pytest.approx(0.5)
+        assert cfg.min_speech_duration_sec == pytest.approx(0.25)
         assert cfg.energy_threshold_factor == pytest.approx(0.6)
+        assert cfg.noise_energy_threshold_factor == pytest.approx(3.0)
         assert cfg.energy_decay_rate == pytest.approx(0.98)
 
     def test_custom_values(self):
@@ -77,12 +80,18 @@ class TestVADConfig:
             aggressiveness=2,
             silence_timeout_sec=1.5,
             speech_start_timeout_sec=2.0,
+            speech_start_min_frames=4,
+            min_speech_duration_sec=0.4,
             energy_threshold_factor=0.6,
+            noise_energy_threshold_factor=2.5,
         )
         assert cfg.aggressiveness == 2
         assert cfg.silence_timeout_sec == pytest.approx(1.5)
         assert cfg.speech_start_timeout_sec == pytest.approx(2.0)
+        assert cfg.speech_start_min_frames == 4
+        assert cfg.min_speech_duration_sec == pytest.approx(0.4)
         assert cfg.energy_threshold_factor == pytest.approx(0.6)
+        assert cfg.noise_energy_threshold_factor == pytest.approx(2.5)
 
     def test_invalid_aggressiveness(self):
         with pytest.raises(ValueError, match="aggressiveness"):
@@ -95,6 +104,18 @@ class TestVADConfig:
     def test_invalid_speech_start_timeout(self):
         with pytest.raises(ValueError, match="speech_start_timeout_sec"):
             VADConfig(speech_start_timeout_sec=0.0)
+
+    def test_invalid_speech_start_min_frames(self):
+        with pytest.raises(ValueError, match="speech_start_min_frames"):
+            VADConfig(speech_start_min_frames=0)
+
+    def test_invalid_min_speech_duration(self):
+        with pytest.raises(ValueError, match="min_speech_duration_sec"):
+            VADConfig(min_speech_duration_sec=-0.1)
+
+    def test_invalid_noise_energy_threshold_factor(self):
+        with pytest.raises(ValueError, match="noise_energy_threshold_factor"):
+            VADConfig(noise_energy_threshold_factor=-0.1)
 
     def test_invalid_max_recording(self):
         with pytest.raises(ValueError, match="max_recording_sec"):
@@ -162,19 +183,31 @@ class TestConversationConfig:
         assert cfg.follow_up_timeout_sec == pytest.approx(5.0)
         assert cfg.follow_up_speech_start_timeout_sec == pytest.approx(1.5)
         assert cfg.history_timeout_sec == pytest.approx(300.0)
+        assert cfg.speak_empty_transcription_errors is False
         assert cfg.barge_in_enabled is False
+        assert cfg.barge_in_min_tts_sec == pytest.approx(0.8)
+        assert cfg.barge_in_poll_timeout_sec == pytest.approx(0.25)
+        assert cfg.barge_in_reset_interval == 8
 
     def test_custom_values(self):
         cfg = ConversationConfig(
             follow_up_timeout_sec=10.0,
             follow_up_speech_start_timeout_sec=2.0,
             history_timeout_sec=0.0,
+            speak_empty_transcription_errors=True,
             barge_in_enabled=True,
+            barge_in_min_tts_sec=1.2,
+            barge_in_poll_timeout_sec=0.5,
+            barge_in_reset_interval=4,
         )
         assert cfg.follow_up_timeout_sec == pytest.approx(10.0)
         assert cfg.follow_up_speech_start_timeout_sec == pytest.approx(2.0)
         assert cfg.history_timeout_sec == pytest.approx(0.0)
+        assert cfg.speak_empty_transcription_errors is True
         assert cfg.barge_in_enabled is True
+        assert cfg.barge_in_min_tts_sec == pytest.approx(1.2)
+        assert cfg.barge_in_poll_timeout_sec == pytest.approx(0.5)
+        assert cfg.barge_in_reset_interval == 4
 
     def test_invalid_follow_up_timeout(self):
         with pytest.raises(ValueError, match="follow_up_timeout_sec"):
@@ -183,6 +216,18 @@ class TestConversationConfig:
     def test_invalid_follow_up_speech_start_timeout(self):
         with pytest.raises(ValueError, match="follow_up_speech_start_timeout_sec"):
             ConversationConfig(follow_up_speech_start_timeout_sec=0)
+
+    def test_invalid_barge_in_min_tts_sec(self):
+        with pytest.raises(ValueError, match="barge_in_min_tts_sec"):
+            ConversationConfig(barge_in_min_tts_sec=-0.1)
+
+    def test_invalid_barge_in_poll_timeout_sec(self):
+        with pytest.raises(ValueError, match="barge_in_poll_timeout_sec"):
+            ConversationConfig(barge_in_poll_timeout_sec=0)
+
+    def test_invalid_barge_in_reset_interval(self):
+        with pytest.raises(ValueError, match="barge_in_reset_interval"):
+            ConversationConfig(barge_in_reset_interval=0)
 
 
 class TestTTSConfig:
@@ -314,7 +359,11 @@ class TestAppConfig:
                 "follow_up_timeout_sec": 8.0,
                 "follow_up_speech_start_timeout_sec": 2.0,
                 "history_timeout_sec": 600.0,
+                "speak_empty_transcription_errors": True,
                 "barge_in_enabled": True,
+                "barge_in_min_tts_sec": 1.0,
+                "barge_in_poll_timeout_sec": 0.4,
+                "barge_in_reset_interval": 6,
             },
         }
         with tempfile.NamedTemporaryFile(
@@ -327,7 +376,11 @@ class TestAppConfig:
         assert cfg.conversation.follow_up_timeout_sec == pytest.approx(8.0)
         assert cfg.conversation.follow_up_speech_start_timeout_sec == pytest.approx(2.0)
         assert cfg.conversation.history_timeout_sec == pytest.approx(600.0)
+        assert cfg.conversation.speak_empty_transcription_errors is True
         assert cfg.conversation.barge_in_enabled is True
+        assert cfg.conversation.barge_in_min_tts_sec == pytest.approx(1.0)
+        assert cfg.conversation.barge_in_poll_timeout_sec == pytest.approx(0.4)
+        assert cfg.conversation.barge_in_reset_interval == 6
         Path(path).unlink()
 
     def test_from_yaml_full(self):
