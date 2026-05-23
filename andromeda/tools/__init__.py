@@ -42,9 +42,9 @@ _TOOLS = [
 
 
 # Register all available tools with the AI agent
-def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFeedback) -> None:
+def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFeedback, tts=None) -> None:
     clear_intents()
-    set_timer.configure(feedback, tools_cfg.timer_max_sec)
+    set_timer.configure(feedback, tools_cfg.timer_max_sec, tts=tts)
     knowledge_base.configure(tools_cfg.knowledge_base_path, tools_cfg.allow_sensitive_memory)
     get_weather.configure(tools_cfg.weather_timeout_sec)
     get_latest_news.configure(tools_cfg.news_timeout_sec)
@@ -64,7 +64,16 @@ def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFe
     # Fast intents — bypass LLM for simple, deterministic requests
     register_intent(patterns=[r"\b(che\s+)?or[ae]\b", r"\bche\s+ore\s+sono\b"], tool_handler=get_datetime.handler)
     register_intent(patterns=[r"\b(che\s+)?giorno\b", r"\b(che\s+)?data\b"], tool_handler=get_datetime.handler)
-    intents_count = 2
+    register_intent(
+        patterns=[
+            r"\bquanto\s+manca\b.*\btimer\b",
+            r"\bquant[io]\s+minut[io]\s+mancano\b.*\btimer\b",
+            r"\btimer\b.*\bquanto\s+manca\b",
+        ],
+        tool_handler=set_timer.handler,
+        args={"action": "status"},
+    )
+    intents_count = 3
 
     if tools_cfg.allow_system_control:
         register_intent(patterns=[r"\balza.*volume\b", r"\bvolume.*alto\b", r"\bpiù\s+forte\b"], tool_handler=system_control.handler, args={"action": "volume_up"})

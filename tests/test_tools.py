@@ -136,34 +136,40 @@ class TestSetTimer:
     @pytest.fixture(autouse=True)
     def setup_timer(self):
         mock_feedback = MagicMock()
-        set_timer.configure(mock_feedback, max_sec=3600)
+        mock_tts = MagicMock()
+        mock_tts.speak = AsyncMock()
+        set_timer.configure(mock_feedback, max_sec=3600, tts=mock_tts)
         set_timer._state.active_timers.clear()
         yield
         # Cancel any remaining timers
-        for task in set_timer._state.active_timers.values():
-            task.cancel()
+        for timer in set_timer._state.active_timers.values():
+            timer.cancel()
         set_timer._state.active_timers.clear()
 
     def test_invalid_seconds_string(self):
-        result = set_timer.handler({"seconds": "abc"})
+        result = set_timer.handler({"seconds": "abc", "label": "pasta"})
         assert "Errore" in result
 
     def test_zero_seconds(self):
-        result = set_timer.handler({"seconds": 0})
+        result = set_timer.handler({"seconds": 0, "label": "pasta"})
         assert "Errore" in result
 
     def test_negative_seconds(self):
-        result = set_timer.handler({"seconds": -5})
+        result = set_timer.handler({"seconds": -5, "label": "pasta"})
         assert "Errore" in result
 
     def test_exceeds_max(self):
-        result = set_timer.handler({"seconds": 99999})
+        result = set_timer.handler({"seconds": 99999, "label": "pasta"})
         assert "Errore" in result
         assert "massima" in result
 
+    def test_missing_label_asks_question(self):
+        result = set_timer.handler({"seconds": 30})
+        assert result == "Un timer cosa?"
+
     @pytest.mark.asyncio
     async def test_valid_seconds(self):
-        result = set_timer.handler({"seconds": 30})
+        result = set_timer.handler({"seconds": 30, "label": "pasta"})
         assert "timer" in result.lower()
         assert "30 secondi" in result
 
@@ -175,7 +181,7 @@ class TestSetTimer:
 
     @pytest.mark.asyncio
     async def test_minutes_and_seconds(self):
-        result = set_timer.handler({"seconds": 90})
+        result = set_timer.handler({"seconds": 90, "label": "pasta"})
         assert "1 minuti" in result
         assert "30 secondi" in result
 
@@ -184,9 +190,27 @@ class TestSetTimer:
         result = set_timer.handler({"seconds": 60, "label": "bucato"})
         assert "bucato" in result
 
+    @pytest.mark.asyncio
+    async def test_status_no_active_timers(self):
+        result = set_timer.handler({"action": "status"})
+        assert "Non ci sono timer attivi" in result
+
+    @pytest.mark.asyncio
+    async def test_status_lists_active_timers(self):
+        set_timer.handler({"seconds": 300, "label": "pasta"})
+        set_timer.handler({"seconds": 60, "label": "bucato"})
+
+        result = set_timer.handler({"action": "status"})
+
+        assert "Timer attivi" in result
+        assert "pasta" in result
+        assert "bucato" in result
+        assert "mancano" in result
+
     def test_definition_structure(self):
         assert set_timer.DEFINITION["function"]["name"] == "set_timer"
         params = set_timer.DEFINITION["function"]["parameters"]
+        assert "action" in params["properties"]
         assert "seconds" in params["properties"]
         assert "label" in params["properties"]
 
@@ -284,3 +308,14 @@ class TestToolRegistration:
         register_all_tools(agent, cfg, feedback)
 
         assert "system_control" in agent.registered
+
+    @pytest.mark.asyncio
+    async def test_timer_status_fast_intent(self):
+        agent = DummyAgent()
+        feedback = MagicMock()
+        cfg = ToolsConfig()
+        register_all_tools(agent, cfg, feedback)
+
+        result = await match_and_execute("quanto manca al timer?")
+
+        assert "Non ci sono timer attivi" in result

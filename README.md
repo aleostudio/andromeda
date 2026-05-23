@@ -326,7 +326,7 @@ Andromeda comes with the following built-in tools that the LLM can invoke:
 | `get_weather` | Fetches current weather via Open-Meteo API (cached 5 min) |
 | `get_latest_news` | Scrapes latest news from Il Post by category (cached 10 min) |
 | `knowledge_base` | Persistent key-value memory (save, recall, list, delete) |
-| `set_timer` | Countdown timer with audio alarm |
+| `set_timer` | Countdown timers with labels, status queries and spoken completion alarms |
 | `system_control` | Volume and brightness control (macOS, Linux, Windows) |
 | `web_search` | Web search fallback via DuckDuckGo with offline detection |
 
@@ -338,9 +338,14 @@ These requests are handled instantly via pattern matching:
 | :--- | :--- |
 | "che ora/ore", "che ore sono" | Returns current date and time |
 | "che giorno/data" | Returns current date |
+| "quanto manca al timer", "quanti minuti mancano al timer" | Reports remaining time for all active timers |
 | "alza volume", "piu forte" | Volume up |
 | "abbassa volume", "piu piano" | Volume down |
 | "muta audio", "silenzio" | Toggle mute |
+
+### Timers
+
+Timer labels are required. If the user asks for a timer without specifying what it is for, Andromeda asks: "Un timer cosa?". The label is reused when the timer completes, for example: "Timer pasta completato.". While timers are active, questions like "quanto manca al timer?" are handled immediately and return the remaining time for every active timer.
 
 [↑ index](#index)
 

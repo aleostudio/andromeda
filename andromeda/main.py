@@ -131,7 +131,7 @@ class VoiceAssistant:
 
         # Register tools
         try:
-            register_all_tools(self._agent, self._cfg.tools, self._feedback)
+            register_all_tools(self._agent, self._cfg.tools, self._feedback, self._tts)
         except Exception:
             logger.exception("Failed to register tools")
 
