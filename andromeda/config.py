@@ -235,6 +235,12 @@ class ToolsConfig:
 
 
 @dataclass(frozen=True)
+class StorageConfig:
+    sqlite_path: str = "data/andromeda.sqlite3"
+    legacy_knowledge_json_path: str = "data/knowledge.json"
+
+
+@dataclass(frozen=True)
 class HealthCheckConfig:
     enabled: bool = False
     host: str = "127.0.0.1"
@@ -266,6 +272,7 @@ class AppConfig:
     tts: TTSConfig = field(default_factory=TTSConfig)
     conversation: ConversationConfig = field(default_factory=ConversationConfig)
     tools: ToolsConfig = field(default_factory=ToolsConfig)
+    storage: StorageConfig = field(default_factory=StorageConfig)
     feedback: FeedbackConfig = field(default_factory=FeedbackConfig)
     health_check: HealthCheckConfig = field(default_factory=HealthCheckConfig)
     logging: LoggingConfig = field(default_factory=LoggingConfig)
@@ -291,6 +298,7 @@ class AppConfig:
             tts=TTSConfig(**raw.get("tts", {})),
             conversation=ConversationConfig(**raw.get("conversation", {})),
             tools=ToolsConfig(**raw.get("tools", {})),
+            storage=StorageConfig(**raw.get("storage", {})),
             feedback=FeedbackConfig(**raw.get("feedback", {})),
             health_check=HealthCheckConfig(**raw.get("health_check", {})),
             logging=LoggingConfig(**raw.get("logging", {})),

@@ -3,13 +3,12 @@
 
 import json
 import logging
-import os
 import re
-import tempfile
 import threading
 from dataclasses import dataclass, field
 from pathlib import Path
 from andromeda.messages import msg
+from andromeda.storage import SQLiteStore
 
 logger = logging.getLogger("[ TOOL KNOWLEDGE BASE ]")
 audit_logger = logging.getLogger("[ TOOL AUDIT ]")
@@ -28,8 +27,8 @@ _SENSITIVE_PATTERNS = (
 
 @dataclass
 class _KnowledgeBaseState:
-    store_path: str = "data/knowledge.json"
-    cache: dict | None = None
+    store: SQLiteStore | None = None
+    legacy_json_path: str = "data/knowledge.json"
     allow_sensitive_memory: bool = False
     lock: threading.RLock = field(default_factory=threading.RLock)
 
@@ -83,11 +82,25 @@ DEFINITION = {
 }
 
 
-def configure(store_path: str, allow_sensitive_memory: bool = False) -> None:
+def configure(
+    store: SQLiteStore | str = "data/andromeda.sqlite3",
+    allow_sensitive_memory: bool = False,
+    *,
+    legacy_json_path: str = "data/knowledge.json",
+) -> None:
     with _state.lock:
-        _state.store_path = store_path
-        _state.cache = None
+        if isinstance(store, SQLiteStore):
+            _state.store = store
+        else:
+            path = Path(store)
+            if path.suffix.lower() == ".json":
+                path = path.with_suffix(".sqlite3")
+                legacy_json_path = str(store)
+            _state.store = SQLiteStore(path)
+        _state.store.connect()
+        _state.legacy_json_path = legacy_json_path
         _state.allow_sensitive_memory = allow_sensitive_memory
+        _import_legacy_json_locked()
 
 
 def _is_sensitive_text(text: str) -> bool:
@@ -98,46 +111,36 @@ def _is_sensitive_text(text: str) -> bool:
     return False
 
 
-def _load_store() -> dict:
-    with _state.lock:
-        if _state.cache is not None:
-            return _state.cache
+def _store() -> SQLiteStore:
+    if _state.store is None:
+        _state.store = SQLiteStore("data/andromeda.sqlite3")
+        _state.store.connect()
+        _import_legacy_json_locked()
 
-        path = Path(_state.store_path)
-        if not path.exists():
-            _state.cache = {}
-            return _state.cache
-        try:
-            _state.cache = json.loads(path.read_text(encoding="utf-8"))
-            logger.debug("Knowledge base loaded from disk: %d entries", len(_state.cache))
-            return _state.cache
-        except (json.JSONDecodeError, OSError):
-            logger.warning("Failed to load knowledge base from %s", path)
-            _state.cache = {}
-            return _state.cache
+    return _state.store
 
 
-def _save_store(data: dict) -> None:
-    with _state.lock:
-        path = Path(_state.store_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+def _import_legacy_json_locked() -> None:
+    path = Path(_state.legacy_json_path)
+    if not path.exists():
+        return
 
-        # Atomic write: write to temp file then rename to prevent corruption on crash
-        fd, tmp_path = tempfile.mkstemp(dir=path.parent, suffix=".tmp")
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (json.JSONDecodeError, OSError):
+        logger.warning("Failed to import legacy knowledge JSON from %s", path)
+        return
 
-        try:
-            with os.fdopen(fd, "w", encoding="utf-8") as f:
-                json.dump(data, f, ensure_ascii=False, indent=2)
-            os.replace(tmp_path, path)
-        except Exception:
-            os.unlink(tmp_path)
-            raise
+    if not isinstance(raw, dict):
+        logger.warning("Legacy knowledge JSON is not an object: %s", path)
+        return
 
-        # Update in-memory cache after successful write
-        _state.cache = data
+    imported = _store().import_memories({str(k): str(v) for k, v in raw.items()})
+    if imported:
+        logger.info("Imported %d legacy knowledge entries into SQLite", imported)
 
 
-def _action_save(store: dict, key: str, value: str, allow_sensitive: bool) -> str:
+def _action_save(key: str, value: str, allow_sensitive: bool) -> str:
     if not key or not value:
         return msg("kb.save_missing_fields")
 
@@ -147,57 +150,54 @@ def _action_save(store: dict, key: str, value: str, allow_sensitive: bool) -> st
         audit_logger.info("tool=knowledge_base action=save_blocked_sensitive key=%s", key)
         return msg("kb.sensitive_blocked")
 
-    store[key] = value
-    _save_store(store)
+    _store().save_memory(key, value, sensitive=is_sensitive)
     logger.info("Knowledge base: saved '%s'", key)
     audit_logger.info("tool=knowledge_base action=save key=%s", key)
 
     return msg("kb.saved", key=key, value=value)
 
 
-def _action_recall(store: dict, key: str) -> str:
+def _action_recall(key: str) -> str:
     if not key:
         return msg("kb.recall_missing_key")
 
-    result = store.get(key)
+    result = _store().get_memory(key)
     if result is not None:
-        return f"{key}: {result}"
+        return f"{key}: {result.value}"
 
-    # Fuzzy search: check if key is substring of any stored key
-    matches = {k: v for k, v in store.items() if key.lower() in k.lower()}
+    matches = _store().search_memories(key)
     if not matches:
         return msg("kb.recall_not_found", key=key)
 
-    parts = [f"- {k}: {v}" for k, v in matches.items()]
+    parts = [f"- {record.key}: {record.value}" for record in matches]
 
     return msg("kb.recall_matches", matches=", ".join(parts))
 
 
-def _action_list(store: dict) -> str:
-    if not store:
+def _action_list() -> str:
+    records = _store().list_memories()
+    if not records:
         return msg("kb.empty")
-    keys = ", ".join(store.keys())
+    keys = ", ".join(record.key for record in records)
 
     return msg("kb.list", keys=keys)
 
 
-def _action_delete(store: dict, key: str) -> str:
+def _action_delete(key: str) -> str:
     if not key:
         return msg("kb.delete_missing_key")
-    if key not in store:
+    if not _store().delete_memory(key):
         return msg("kb.delete_not_found", key=key)
-    del store[key]
-    _save_store(store)
     audit_logger.info("tool=knowledge_base action=delete key=%s", key)
 
     return msg("kb.deleted", key=key)
 
 
 _ACTION_MAP = {
-    "save": lambda store, key, value, allow_sensitive: _action_save(store, key, value, allow_sensitive),
-    "recall": lambda store, key, _value: _action_recall(store, key),
-    "list": lambda store, _key, _value: _action_list(store),
-    "delete": lambda store, key, _value: _action_delete(store, key),
+    "save": lambda key, value, allow_sensitive: _action_save(key, value, allow_sensitive),
+    "recall": lambda key, _value: _action_recall(key),
+    "list": lambda _key, _value: _action_list(),
+    "delete": lambda key, _value: _action_delete(key),
 }
 
 
@@ -213,5 +213,5 @@ def handler(args: dict) -> str:
 
     with _state.lock:
         if action == "save":
-            return action_fn(_load_store(), key, value, allow_sensitive)
-        return action_fn(_load_store(), key, value)
+            return action_fn(key, value, allow_sensitive)
+        return action_fn(key, value)

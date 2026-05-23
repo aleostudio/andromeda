@@ -6,6 +6,7 @@ from andromeda.agent import AIAgent
 from andromeda.config import ToolsConfig
 from andromeda.feedback import AudioFeedback
 from andromeda.intent import clear_intents, register_intent
+from andromeda.storage import SQLiteStore
 from andromeda.tools import (
     get_datetime, 
     get_latest_news, 
@@ -42,10 +43,22 @@ _TOOLS = [
 
 
 # Register all available tools with the AI agent
-def register_all_tools(agent: AIAgent, tools_cfg: ToolsConfig, feedback: AudioFeedback, tts=None) -> None:
+def register_all_tools(
+    agent: AIAgent,
+    tools_cfg: ToolsConfig,
+    feedback: AudioFeedback,
+    tts=None,
+    *,
+    store: SQLiteStore | None = None,
+    legacy_knowledge_path: str | None = None,
+) -> None:
     clear_intents()
     set_timer.configure(feedback, tools_cfg.timer_max_sec, tts=tts)
-    knowledge_base.configure(tools_cfg.knowledge_base_path, tools_cfg.allow_sensitive_memory)
+    knowledge_base.configure(
+        store or tools_cfg.knowledge_base_path,
+        tools_cfg.allow_sensitive_memory,
+        legacy_json_path=legacy_knowledge_path or tools_cfg.knowledge_base_path,
+    )
     get_weather.configure(tools_cfg.weather_timeout_sec)
     get_latest_news.configure(tools_cfg.news_timeout_sec)
     web_search.configure(

@@ -3,13 +3,13 @@
 
 import asyncio
 import json
-import tempfile
+import sqlite3
 from datetime import datetime
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from andromeda.config import ToolsConfig
 from andromeda.intent import clear_intents, match_and_execute
+from andromeda.storage import SQLiteStore
 from andromeda.tools import get_datetime, knowledge_base, register_all_tools, set_timer, system_control
 
 
@@ -37,9 +37,10 @@ class TestKnowledgeBase:
     @pytest.fixture(autouse=True)
     def temp_store(self, tmp_path):
         """Configure knowledge base with temporary store."""
-        store_path = str(tmp_path / "knowledge.json")
-        knowledge_base.configure(store_path)
-        yield store_path
+        sqlite_path = tmp_path / "andromeda.sqlite3"
+        legacy_path = tmp_path / "knowledge.json"
+        knowledge_base.configure(str(sqlite_path), legacy_json_path=str(legacy_path))
+        yield sqlite_path
 
     def test_save(self):
         result = knowledge_base.handler({"action": "save", "key": "wifi", "value": "ABC123"})
@@ -104,12 +105,25 @@ class TestKnowledgeBase:
         assert "Errore" in result
 
     def test_persistence(self, temp_store):
-        """Data survives reload (new handler calls load from file)."""
+        """Data survives reload and is persisted in SQLite."""
         knowledge_base.handler({"action": "save", "key": "persist", "value": "data123"})
 
-        # Verify file exists and contains data
-        store = json.loads(Path(temp_store).read_text())
-        assert store["persist"] == "data123"
+        with sqlite3.connect(temp_store) as conn:
+            row = conn.execute("SELECT value FROM memories WHERE key = ?", ("persist",)).fetchone()
+
+        assert row == ("data123",)
+
+    def test_imports_legacy_json(self, tmp_path):
+        legacy_path = tmp_path / "knowledge.json"
+        legacy_path.write_text(json.dumps({"legacy_key": "legacy_value"}), encoding="utf-8")
+
+        knowledge_base.configure(
+            str(tmp_path / "andromeda.sqlite3"),
+            legacy_json_path=str(legacy_path),
+        )
+        result = knowledge_base.handler({"action": "recall", "key": "legacy_key"})
+
+        assert "legacy_value" in result
 
     def test_definition_structure(self):
         assert knowledge_base.DEFINITION["function"]["name"] == "knowledge_base"
@@ -295,7 +309,7 @@ class TestToolRegistration:
         agent = DummyAgent()
         feedback = MagicMock()
         cfg = ToolsConfig(allow_system_control=False)
-        register_all_tools(agent, cfg, feedback)
+        register_all_tools(agent, cfg, feedback, store=SQLiteStore(":memory:"))
 
         assert "system_control" not in agent.registered
         assert await match_and_execute("alza il volume") is None
@@ -305,7 +319,7 @@ class TestToolRegistration:
         agent = DummyAgent()
         feedback = MagicMock()
         cfg = ToolsConfig(allow_system_control=True)
-        register_all_tools(agent, cfg, feedback)
+        register_all_tools(agent, cfg, feedback, store=SQLiteStore(":memory:"))
 
         assert "system_control" in agent.registered
 
@@ -314,7 +328,7 @@ class TestToolRegistration:
         agent = DummyAgent()
         feedback = MagicMock()
         cfg = ToolsConfig()
-        register_all_tools(agent, cfg, feedback)
+        register_all_tools(agent, cfg, feedback, store=SQLiteStore(":memory:"))
 
         result = await match_and_execute("quanto manca al timer?")
 

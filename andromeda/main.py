@@ -21,6 +21,7 @@ from andromeda.intent import match_and_execute
 from andromeda.messages import msg, set_locale
 from andromeda.metrics import PerformanceMetrics
 from andromeda.state_machine import AssistantState, StateMachine
+from andromeda.storage import SQLiteStore
 from andromeda.stt import SpeechRecognizer
 from andromeda.tools import register_all_tools
 from andromeda.tools.http_client import close_client
@@ -47,6 +48,7 @@ class VoiceAssistant:
         self._feedback = AudioFeedback(config.audio, config.feedback)
         self._metrics = PerformanceMetrics()
         self._health = HealthCheckServer(config.health_check)
+        self._store = SQLiteStore(config.storage.sqlite_path)
 
         # State machine
         self._sm = StateMachine()
@@ -118,6 +120,12 @@ class VoiceAssistant:
             raise
 
         try:
+            self._store.connect()
+        except Exception:
+            logger.exception("Failed to initialize SQLite storage")
+            raise
+
+        try:
             self._tts.initialize()
         except Exception:
             logger.exception("Failed to initialize TTS engine")
@@ -131,7 +139,14 @@ class VoiceAssistant:
 
         # Register tools
         try:
-            register_all_tools(self._agent, self._cfg.tools, self._feedback, self._tts)
+            register_all_tools(
+                self._agent,
+                self._cfg.tools,
+                self._feedback,
+                self._tts,
+                store=self._store,
+                legacy_knowledge_path=self._cfg.storage.legacy_knowledge_json_path,
+            )
         except Exception:
             logger.exception("Failed to register tools")
 
@@ -593,6 +608,10 @@ class VoiceAssistant:
             await close_client()
         except Exception:
             logger.warning("Error closing shared HTTP client")
+        try:
+            self._store.close()
+        except Exception:
+            logger.warning("Error closing SQLite store")
 
 
 # Logging setup

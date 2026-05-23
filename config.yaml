@@ -89,7 +89,7 @@ conversation:
   barge_in_reset_interval: 8    # reset wake model periodically while monitoring TTS
 
 tools:
-  knowledge_base_path: "data/knowledge.json"
+  knowledge_base_path: "data/knowledge.json" # legacy JSON path; imported into SQLite for compatibility
   allow_sensitive_memory: false       # if true, allows storing sensitive data in persistent memory
   weather_timeout_sec: 10.0
   news_timeout_sec: 10.0
@@ -98,6 +98,10 @@ tools:
   web_search_max_results: 3           # numero di risultati da restituire
   web_search_max_content_chars: 2000  # max caratteri dal contenuto della pagina
   web_search_fetch_page_content: false # scarica il contenuto completo del primo risultato
+
+storage:
+  sqlite_path: "data/andromeda.sqlite3"       # local SQLite database for memory, timers and scheduled events
+  legacy_knowledge_json_path: "data/knowledge.json" # imported non-destructively if present
 
 feedback:
   wake_sound: "sounds/wake.wav"

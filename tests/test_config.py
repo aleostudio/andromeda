@@ -15,6 +15,7 @@ from andromeda.config import (
     LoggingConfig,
     NoiseConfig,
     STTConfig,
+    StorageConfig,
     ToolsConfig,
     TTSConfig,
     VADConfig,
@@ -299,6 +300,13 @@ class TestToolsConfig:
         assert cfg.allow_system_control is True
 
 
+class TestStorageConfig:
+    def test_defaults(self):
+        cfg = StorageConfig()
+        assert cfg.sqlite_path == "data/andromeda.sqlite3"
+        assert cfg.legacy_knowledge_json_path == "data/knowledge.json"
+
+
 class TestAppConfig:
     def test_defaults(self):
         cfg = AppConfig()
@@ -308,6 +316,7 @@ class TestAppConfig:
         assert isinstance(cfg.conversation, ConversationConfig)
         assert isinstance(cfg.tts, TTSConfig)
         assert isinstance(cfg.tools, ToolsConfig)
+        assert isinstance(cfg.storage, StorageConfig)
         assert isinstance(cfg.feedback, FeedbackConfig)
         assert isinstance(cfg.logging, LoggingConfig)
 
@@ -334,6 +343,7 @@ class TestAppConfig:
                 "streaming_clause_split": False,
                 "stream_diagnostics": False,
             },
+            "storage": {"sqlite_path": "data/test.sqlite3"},
             "vad": {"aggressiveness": 2},
         }
         with tempfile.NamedTemporaryFile(
@@ -347,6 +357,7 @@ class TestAppConfig:
         assert cfg.agent.streaming is True
         assert cfg.agent.streaming_clause_split is False
         assert cfg.agent.stream_diagnostics is False
+        assert cfg.storage.sqlite_path == "data/test.sqlite3"
         assert cfg.vad.aggressiveness == 2
         # Defaults preserved
         assert cfg.audio.sample_rate == 16000

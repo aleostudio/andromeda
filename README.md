@@ -227,7 +227,9 @@ Once setup is finished, customize your `config.yaml` file and update your model 
 | `feedback` | `wake_sound` | `sounds/wake.wav` | Cue played when the wake word is detected |
 | `feedback` | `idle_sound` | `sounds/idle.wav` | Cue played on `LISTENING -> IDLE`; if missing, Andromeda uses the wake cue reversed |
 | `feedback` | `done_sound` | `sounds/done.wav` | Cue played when listening/processing is completed |
-| `tools` | `knowledge_base_path` | `data/knowledge.json` | Persistent memory storage path |
+| `storage` | `sqlite_path` | `data/andromeda.sqlite3` | Local SQLite database for memory, timers and scheduled events |
+| `storage` | `legacy_knowledge_json_path` | `data/knowledge.json` | Existing JSON memory imported non-destructively into SQLite if present |
+| `tools` | `knowledge_base_path` | `data/knowledge.json` | Legacy JSON memory path kept for backward compatibility |
 | `tools` | `allow_sensitive_memory` | `false` | Allow saving sensitive entries in memory without explicit per-request opt-in |
 | `tools` | `timer_max_sec` | `3600` | Maximum timer duration in seconds |
 | `tools` | `allow_system_control` | `true` | Enable volume/brightness system control tool and related fast intents |
@@ -267,6 +269,7 @@ The bundled `config.yaml` is tuned for faster local interaction than the conserv
 - `conversation.barge_in_min_tts_sec: 0.8`
 - `conversation.barge_in_poll_timeout_sec: 0.25`
 - `conversation.barge_in_reset_interval: 8`
+- `storage.sqlite_path: data/andromeda.sqlite3`
 
 This keeps the core assistant fully offline after first-time model downloads, reduces endpointing delay, avoids clause-level prosody issues, and enables a guarded wake-word interruption path during TTS playback.
 
@@ -325,7 +328,7 @@ Andromeda comes with the following built-in tools that the LLM can invoke:
 | `get_datetime` | Returns current date and time in Italian |
 | `get_weather` | Fetches current weather via Open-Meteo API (cached 5 min) |
 | `get_latest_news` | Scrapes latest news from Il Post by category (cached 10 min) |
-| `knowledge_base` | Persistent key-value memory (save, recall, list, delete) |
+| `knowledge_base` | Persistent key-value memory in local SQLite (save, recall, list, delete; legacy JSON import) |
 | `set_timer` | Countdown timers with labels, status queries and spoken completion alarms |
 | `system_control` | Volume and brightness control (macOS, Linux, Windows) |
 | `web_search` | Web search fallback via DuckDuckGo with offline detection |
