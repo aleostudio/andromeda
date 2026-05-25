@@ -1,9 +1,11 @@
 # Copyright (c) 2026 Alessandro Orrù
 # Licensed under MIT
 
+import asyncio
 import numpy as np
 import pytest
-from andromeda.tts import _FADE_SAMPLES, _apply_fade_out
+from andromeda.config import AudioConfig, TTSConfig
+from andromeda.tts import TextToSpeech, _FADE_SAMPLES, _apply_fade_out
 
 
 class TestApplyFadeOut:
@@ -56,3 +58,67 @@ class TestFadeConstants:
     def test_fade_samples_reasonable(self):
         # At 22050Hz, 64 samples = ~3ms of fade — reasonable
         assert _FADE_SAMPLES <= 256
+
+
+class TestTTSPlaybackLock:
+    @pytest.mark.asyncio
+    async def test_speak_waits_for_streaming_playback(self, monkeypatch):
+        tts = TextToSpeech(AudioConfig(), TTSConfig())
+        events: list[str] = []
+
+        async def fake_stream(_queue):
+            events.append("stream_start")
+            await asyncio.sleep(0.05)
+            events.append("stream_end")
+
+        async def fake_speak(text):
+            events.append(f"speak_start:{text}")
+            await asyncio.sleep(0.01)
+            events.append(f"speak_end:{text}")
+
+        monkeypatch.setattr(tts, "_speak_streamed_engine", fake_stream)
+        monkeypatch.setattr(tts, "_speak", fake_speak)
+
+        stream_task = asyncio.create_task(tts.speak_streamed(asyncio.Queue()))
+        await asyncio.sleep(0)
+        speak_task = asyncio.create_task(tts.speak("timer completato"))
+
+        await asyncio.gather(stream_task, speak_task)
+
+        assert events == [
+            "stream_start",
+            "stream_end",
+            "speak_start:timer completato",
+            "speak_end:timer completato",
+        ]
+
+    @pytest.mark.asyncio
+    async def test_notification_cue_waits_for_streaming_playback(self, monkeypatch):
+        tts = TextToSpeech(AudioConfig(), TTSConfig())
+        events: list[str] = []
+
+        async def fake_stream(_queue):
+            events.append("stream_start")
+            await asyncio.sleep(0.05)
+            events.append("stream_end")
+
+        async def fake_speak(text):
+            events.append(f"speak:{text}")
+
+        monkeypatch.setattr(tts, "_speak_streamed_engine", fake_stream)
+        monkeypatch.setattr(tts, "_speak", fake_speak)
+
+        stream_task = asyncio.create_task(tts.speak_streamed(asyncio.Queue()))
+        await asyncio.sleep(0)
+        notification_task = asyncio.create_task(
+            tts.speak_notification("timer completato", cue=lambda: events.append("cue")),
+        )
+
+        await asyncio.gather(stream_task, notification_task)
+
+        assert events == [
+            "stream_start",
+            "stream_end",
+            "cue",
+            "speak:timer completato",
+        ]

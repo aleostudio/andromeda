@@ -20,6 +20,29 @@ class MemoryRecord:
     updated_at: str
 
 
+@dataclass(frozen=True)
+class TimerRecord:
+    id: str
+    label: str
+    duration_sec: int
+    started_at: float
+    due_at: float
+    status: str
+    completed_at: float | None
+
+
+@dataclass(frozen=True)
+class ScheduledEventRecord:
+    id: str
+    title: str
+    due_at: str
+    recurrence: str | None
+    payload_json: str | None
+    status: str
+    created_at: str
+    updated_at: str
+
+
 class SQLiteStore:
     def __init__(self, path: str | Path) -> None:
         self._path = Path(path)
@@ -58,10 +81,11 @@ class SQLiteStore:
     def _migrate(self) -> None:
         conn = self._connection()
         version = int(conn.execute("PRAGMA user_version").fetchone()[0])
-        if version < 1:
+        if version <= _SCHEMA_VERSION:
             self._create_schema_v1(conn)
+        if version < 1:
             conn.execute(f"PRAGMA user_version={_SCHEMA_VERSION}")
-            conn.commit()
+        conn.commit()
 
 
     @staticmethod
@@ -212,12 +236,201 @@ class SQLiteStore:
         return cursor.rowcount > 0
 
 
+    def create_timer(
+        self,
+        timer_id: str,
+        label: str,
+        duration_sec: int,
+        started_at: float,
+        due_at: float,
+    ) -> None:
+        with self._lock:
+            conn = self._connection()
+            conn.execute(
+                """
+                INSERT INTO timers (id, label, duration_sec, started_at, due_at, status, completed_at)
+                VALUES (?, ?, ?, ?, ?, 'active', NULL)
+                """,
+                (timer_id, label, duration_sec, started_at, due_at),
+            )
+            conn.commit()
+
+
+    def list_active_timers(self) -> list[TimerRecord]:
+        with self._lock:
+            rows = self._connection().execute(
+                """
+                SELECT id, label, duration_sec, started_at, due_at, status, completed_at
+                FROM timers
+                WHERE status = 'active'
+                ORDER BY due_at
+                """
+            ).fetchall()
+
+        return [self._row_to_timer(row) for row in rows]
+
+
+    def complete_timer(self, timer_id: str, completed_at: float) -> bool:
+        with self._lock:
+            conn = self._connection()
+            cursor = conn.execute(
+                """
+                UPDATE timers
+                SET status = 'completed', completed_at = ?
+                WHERE id = ? AND status = 'active'
+                """,
+                (completed_at, timer_id),
+            )
+            conn.commit()
+
+        return cursor.rowcount > 0
+
+
+    def cancel_timer(self, timer_id: str) -> bool:
+        with self._lock:
+            conn = self._connection()
+            cursor = conn.execute(
+                """
+                UPDATE timers
+                SET status = 'cancelled'
+                WHERE id = ? AND status = 'active'
+                """,
+                (timer_id,),
+            )
+            conn.commit()
+
+        return cursor.rowcount > 0
+
+
+    def create_scheduled_event(
+        self,
+        event_id: str,
+        title: str,
+        due_at: str,
+        *,
+        recurrence: str | None = None,
+        payload_json: str | None = None,
+    ) -> None:
+        now = self._now_text()
+        with self._lock:
+            conn = self._connection()
+            conn.execute(
+                """
+                INSERT INTO scheduled_events (
+                    id, title, due_at, recurrence, payload_json, status, created_at, updated_at
+                )
+                VALUES (?, ?, ?, ?, ?, 'active', ?, ?)
+                """,
+                (event_id, title, due_at, recurrence, payload_json, now, now),
+            )
+            conn.commit()
+
+
+    def list_active_scheduled_events(self) -> list[ScheduledEventRecord]:
+        with self._lock:
+            rows = self._connection().execute(
+                """
+                SELECT id, title, due_at, recurrence, payload_json, status, created_at, updated_at
+                FROM scheduled_events
+                WHERE status = 'active'
+                ORDER BY due_at
+                """
+            ).fetchall()
+
+        return [self._row_to_scheduled_event(row) for row in rows]
+
+
+    def complete_scheduled_event(self, event_id: str) -> bool:
+        with self._lock:
+            conn = self._connection()
+            cursor = conn.execute(
+                "DELETE FROM scheduled_events WHERE id = ? AND status = 'active'",
+                (event_id,),
+            )
+            conn.commit()
+
+        return cursor.rowcount > 0
+
+
+    def cancel_scheduled_event(self, event_id: str) -> bool:
+        with self._lock:
+            conn = self._connection()
+            cursor = conn.execute(
+                "DELETE FROM scheduled_events WHERE id = ? AND status = 'active'",
+                (event_id,),
+            )
+            conn.commit()
+
+        return cursor.rowcount > 0
+
+
+    def delete_expired_scheduled_events(
+        self,
+        due_at_lte: str,
+        *,
+        exclude_ids: set[str] | None = None,
+    ) -> int:
+        exclude_ids = exclude_ids or set()
+        with self._lock:
+            conn = self._connection()
+            if exclude_ids:
+                placeholders = ",".join("?" for _ in exclude_ids)
+                cursor = conn.execute(
+                    f"""
+                    DELETE FROM scheduled_events
+                    WHERE status = 'active'
+                        AND due_at <= ?
+                        AND id NOT IN ({placeholders})
+                    """,
+                    (due_at_lte, *sorted(exclude_ids)),
+                )
+            else:
+                cursor = conn.execute(
+                    """
+                    DELETE FROM scheduled_events
+                    WHERE status = 'active' AND due_at <= ?
+                    """,
+                    (due_at_lte,),
+                )
+            conn.commit()
+
+        return cursor.rowcount
+
+
     @staticmethod
     def _row_to_memory(row: sqlite3.Row) -> MemoryRecord:
         return MemoryRecord(
             key=str(row["key"]),
             value=str(row["value"]),
             sensitive=bool(row["sensitive"]),
+            created_at=str(row["created_at"]),
+            updated_at=str(row["updated_at"]),
+        )
+
+
+    @staticmethod
+    def _row_to_timer(row: sqlite3.Row) -> TimerRecord:
+        completed_at = row["completed_at"]
+        return TimerRecord(
+            id=str(row["id"]),
+            label=str(row["label"]),
+            duration_sec=int(row["duration_sec"]),
+            started_at=float(row["started_at"]),
+            due_at=float(row["due_at"]),
+            status=str(row["status"]),
+            completed_at=float(completed_at) if completed_at is not None else None,
+        )
+
+
+    @staticmethod
+    def _row_to_scheduled_event(row: sqlite3.Row) -> ScheduledEventRecord:
+        return ScheduledEventRecord(
+            id=str(row["id"]),
+            title=str(row["title"]),
+            due_at=str(row["due_at"]),
+            recurrence=str(row["recurrence"]) if row["recurrence"] is not None else None,
+            payload_json=str(row["payload_json"]) if row["payload_json"] is not None else None,
+            status=str(row["status"]),
             created_at=str(row["created_at"]),
             updated_at=str(row["updated_at"]),
         )

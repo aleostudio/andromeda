@@ -329,7 +329,8 @@ Andromeda comes with the following built-in tools that the LLM can invoke:
 | `get_weather` | Fetches current weather via Open-Meteo API (cached 5 min) |
 | `get_latest_news` | Scrapes latest news from Il Post by category (cached 10 min) |
 | `knowledge_base` | Persistent key-value memory in local SQLite (save, recall, list, delete; legacy JSON import) |
-| `set_timer` | Countdown timers with labels, status queries and spoken completion alarms |
+| `set_timer` | Persistent SQLite countdown timers with labels, status queries and spoken completion alarms |
+| `schedule_event` | Persistent SQLite reminders/events with absolute or relative due time |
 | `system_control` | Volume and brightness control (macOS, Linux, Windows) |
 | `web_search` | Web search fallback via DuckDuckGo with offline detection |
 
@@ -349,6 +350,22 @@ These requests are handled instantly via pattern matching:
 ### Timers
 
 Timer labels are required. If the user asks for a timer without specifying what it is for, Andromeda asks: "Un timer cosa?". The label is reused when the timer completes, for example: "Timer pasta completato.". While timers are active, questions like "quanto manca al timer?" are handled immediately and return the remaining time for every active timer.
+
+Timers are stored in the local SQLite database configured by `storage.sqlite_path`. Active timers are resumed on startup; if a timer expired while Andromeda was offline, it completes as soon as timers are resumed.
+
+Timer and reminder notifications are serialized through the same TTS playback lock used by model responses. If a timer expires while Andromeda is speaking, the notification waits for the current TTS stream to finish instead of opening a second audio stream.
+
+### Scheduled events
+
+Scheduled events are persistent reminders stored in the same local SQLite database. SQLite files, including WAL/SHM sidecar files, are ignored by git. At startup, Andromeda opens `storage.sqlite_path` and creates or repairs the schema with `CREATE TABLE IF NOT EXISTS` before tools are registered.
+
+The `schedule_event` tool supports:
+
+- `set` with `title` plus either `due_at` in ISO 8601 format or relative `seconds`
+- `list` to list active reminders with their ids
+- `delete` by reminder `id`
+
+At startup and during runtime checks, expired reminders that are not already firing are deleted from SQLite. When a reminder fires normally, its record is deleted after the audible notification completes.
 
 [↑ index](#index)
 

@@ -12,6 +12,7 @@ from andromeda.tools import (
     get_latest_news, 
     get_weather, 
     knowledge_base, 
+    schedule_event,
     set_timer, 
     system_control, 
     web_search,
@@ -32,6 +33,7 @@ _TOOLS = [
     get_latest_news, 
     get_weather, 
     set_timer,
+    schedule_event,
     knowledge_base, 
     web_search,
 
@@ -53,7 +55,8 @@ def register_all_tools(
     legacy_knowledge_path: str | None = None,
 ) -> None:
     clear_intents()
-    set_timer.configure(feedback, tools_cfg.timer_max_sec, tts=tts)
+    set_timer.configure(feedback, tools_cfg.timer_max_sec, tts=tts, store=store)
+    schedule_event.configure(feedback, tts=tts, store=store)
     knowledge_base.configure(
         store or tools_cfg.knowledge_base_path,
         tools_cfg.allow_sensitive_memory,

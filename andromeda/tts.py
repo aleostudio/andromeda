@@ -37,6 +37,8 @@ class TextToSpeech:
         self._tts_cfg = tts_cfg
         self._voice = None
         self._is_speaking = False
+        self._playback_lock: asyncio.Lock | None = None
+        self._playback_lock_loop: asyncio.AbstractEventLoop | None = None
         self._stop_event = threading.Event()
         self._playback_stream: sd.OutputStream | None = None
         self._syn_config = None
@@ -144,30 +146,73 @@ class TextToSpeech:
         if not text.strip():
             return
 
-        self._is_speaking = True
-        self._stop_event.clear()
-        logger.info("TTS speaking: %s", text[:80])
+        async with self._get_playback_lock():
+            self._is_speaking = True
+            self._stop_event.clear()
+            logger.info("TTS speaking: %s", text[:80])
 
-        try:
-            await self._speak(text)
-        except Exception:
-            logger.exception("TTS playback failed")
-        finally:
-            self._is_speaking = False
+            try:
+                await self._speak(text)
+            except Exception:
+                logger.exception("TTS playback failed")
+            finally:
+                self._is_speaking = False
 
 
     # Consume sentences from a queue and speak them on a single audio stream (streaming mode)
     # Uses prefetch: synthesizes next sentence while current one is playing
     async def speak_streamed(self, sentence_queue: asyncio.Queue) -> None:
-        self._is_speaking = True
-        self._stop_event.clear()
+        async with self._get_playback_lock():
+            self._is_speaking = True
+            self._stop_event.clear()
 
-        try:
-            await self._speak_streamed_engine(sentence_queue)
-        except Exception:
-            logger.exception("TTS streamed playback failed")
-        finally:
-            self._is_speaking = False
+            try:
+                await self._speak_streamed_engine(sentence_queue)
+            except Exception:
+                logger.exception("TTS streamed playback failed")
+            finally:
+                self._is_speaking = False
+
+
+    # Play a short notification atomically after any current TTS playback finishes.
+    async def speak_notification(
+        self,
+        text: str,
+        *,
+        cue: Callable[[], None] | None = None,
+        repeats: int = 1,
+        pause_sec: float = 0.0,
+    ) -> None:
+        if repeats < 1:
+            return
+
+        async with self._get_playback_lock():
+            self._is_speaking = True
+            self._stop_event.clear()
+            loop = asyncio.get_running_loop()
+            logger.info("TTS notification: %s", text[:80])
+
+            try:
+                for index in range(repeats):
+                    if cue is not None:
+                        await loop.run_in_executor(None, cue)
+                    if text.strip():
+                        await self._speak(text)
+                    if pause_sec > 0 and index < repeats - 1 and not self._stop_event.is_set():
+                        await asyncio.sleep(pause_sec)
+            except Exception:
+                logger.exception("TTS notification playback failed")
+            finally:
+                self._is_speaking = False
+
+
+    def _get_playback_lock(self) -> asyncio.Lock:
+        loop = asyncio.get_running_loop()
+        if self._playback_lock is None or self._playback_lock_loop is not loop:
+            self._playback_lock = asyncio.Lock()
+            self._playback_lock_loop = loop
+
+        return self._playback_lock
 
 
     # Streaming Piper with prefetch: synthesize next sentence while playing current

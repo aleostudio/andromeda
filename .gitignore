@@ -59,6 +59,12 @@ models/
 ####################################
 data/
 !data/.gitkeep
+*.sqlite
+*.sqlite3
+*.sqlite-wal
+*.sqlite-shm
+*.sqlite3-wal
+*.sqlite3-shm
 
 ####################################
 # FAISS indexes

@@ -23,7 +23,7 @@ from andromeda.metrics import PerformanceMetrics
 from andromeda.state_machine import AssistantState, StateMachine
 from andromeda.storage import SQLiteStore
 from andromeda.stt import SpeechRecognizer
-from andromeda.tools import register_all_tools
+from andromeda.tools import register_all_tools, schedule_event, set_timer
 from andromeda.tools.http_client import close_client
 from andromeda.tts import TextToSpeech
 from andromeda.vad import VoiceActivityDetector
@@ -174,6 +174,16 @@ class VoiceAssistant:
         # Pre-warm Ollama model (load into GPU/RAM)
         if self._cfg.agent.prewarm:
             await self._agent.prewarm_model()
+
+        try:
+            set_timer.resume_persisted_timers()
+        except Exception:
+            logger.warning("Failed to resume persisted timers")
+
+        try:
+            schedule_event.resume_persisted_events()
+        except Exception:
+            logger.warning("Failed to resume persisted scheduled events")
 
         try:
             self._audio.start()

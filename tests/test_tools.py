@@ -4,13 +4,13 @@
 import asyncio
 import json
 import sqlite3
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from andromeda.config import ToolsConfig
 from andromeda.intent import clear_intents, match_and_execute
 from andromeda.storage import SQLiteStore
-from andromeda.tools import get_datetime, knowledge_base, register_all_tools, set_timer, system_control
+from andromeda.tools import get_datetime, knowledge_base, register_all_tools, schedule_event, set_timer, system_control
 
 
 class TestGetDatetime:
@@ -148,17 +148,19 @@ class TestKnowledgeBase:
 
 class TestSetTimer:
     @pytest.fixture(autouse=True)
-    def setup_timer(self):
+    def setup_timer(self, tmp_path):
         mock_feedback = MagicMock()
         mock_tts = MagicMock()
         mock_tts.speak = AsyncMock()
-        set_timer.configure(mock_feedback, max_sec=3600, tts=mock_tts)
+        store = SQLiteStore(tmp_path / "andromeda.sqlite3")
+        set_timer.configure(mock_feedback, max_sec=3600, tts=mock_tts, store=store)
         set_timer._state.active_timers.clear()
-        yield
+        yield store
         # Cancel any remaining timers
         for timer in set_timer._state.active_timers.values():
             timer.cancel()
         set_timer._state.active_timers.clear()
+        store.close()
 
     def test_invalid_seconds_string(self):
         result = set_timer.handler({"seconds": "abc", "label": "pasta"})
@@ -186,6 +188,16 @@ class TestSetTimer:
         result = set_timer.handler({"seconds": 30, "label": "pasta"})
         assert "timer" in result.lower()
         assert "30 secondi" in result
+
+    @pytest.mark.asyncio
+    async def test_timer_is_persisted(self, setup_timer):
+        set_timer.handler({"seconds": 30, "label": "pasta"})
+
+        active = setup_timer.list_active_timers()
+
+        assert len(active) == 1
+        assert active[0].label == "pasta"
+        assert active[0].duration_sec == 30
 
     @pytest.mark.asyncio
     async def test_valid_minutes(self):
@@ -221,12 +233,130 @@ class TestSetTimer:
         assert "bucato" in result
         assert "mancano" in result
 
+    @pytest.mark.asyncio
+    async def test_status_restores_active_timers_from_sqlite(self, setup_timer):
+        set_timer.handler({"seconds": 300, "label": "pasta"})
+
+        for timer in set_timer._state.active_timers.values():
+            timer.cancel()
+        set_timer._state.active_timers.clear()
+
+        result = set_timer.handler({"action": "status"})
+
+        assert "Timer attivi" in result
+        assert "pasta" in result
+
     def test_definition_structure(self):
         assert set_timer.DEFINITION["function"]["name"] == "set_timer"
         params = set_timer.DEFINITION["function"]["parameters"]
         assert "action" in params["properties"]
         assert "seconds" in params["properties"]
         assert "label" in params["properties"]
+
+
+class TestScheduleEvent:
+    @pytest.fixture(autouse=True)
+    def setup_events(self, tmp_path):
+        mock_feedback = MagicMock()
+        mock_tts = MagicMock()
+        mock_tts.speak = AsyncMock()
+        store = SQLiteStore(tmp_path / "andromeda.sqlite3")
+        schedule_event.configure(mock_feedback, tts=mock_tts, store=store)
+        schedule_event._state.active_events.clear()
+        yield store
+        for event in schedule_event._state.active_events.values():
+            event.cancel()
+        schedule_event._state.active_events.clear()
+        store.close()
+
+    def test_missing_title(self):
+        result = schedule_event.handler({"action": "set", "seconds": 60})
+        assert "titolo" in result
+
+    def test_missing_due_at(self):
+        result = schedule_event.handler({"action": "set", "title": "chiamare Marco"})
+        assert "quando" in result
+
+    def test_invalid_due_at(self):
+        result = schedule_event.handler({"action": "set", "title": "chiamare Marco", "due_at": "not-a-date"})
+        assert "non valida" in result
+
+    @pytest.mark.asyncio
+    async def test_set_relative_event(self, setup_events):
+        result = schedule_event.handler({"action": "set", "title": "chiamare Marco", "seconds": 60})
+
+        active = setup_events.list_active_scheduled_events()
+
+        assert "Promemoria" in result
+        assert len(active) == 1
+        assert active[0].title == "chiamare Marco"
+
+    @pytest.mark.asyncio
+    async def test_list_events(self):
+        schedule_event.handler({"action": "set", "title": "chiamare Marco", "seconds": 60})
+
+        result = schedule_event.handler({"action": "list"})
+
+        assert "Promemoria attivi" in result
+        assert "chiamare Marco" in result
+
+    @pytest.mark.asyncio
+    async def test_delete_event(self, setup_events):
+        schedule_event.handler({"action": "set", "title": "chiamare Marco", "seconds": 60})
+        event_id = setup_events.list_active_scheduled_events()[0].id
+
+        result = schedule_event.handler({"action": "delete", "id": event_id})
+
+        assert "eliminato" in result
+        assert setup_events.list_active_scheduled_events() == []
+
+    @pytest.mark.asyncio
+    async def test_restores_active_events_from_sqlite(self, setup_events):
+        schedule_event.handler({"action": "set", "title": "chiamare Marco", "seconds": 60})
+
+        for event in schedule_event._state.active_events.values():
+            event.cancel()
+        schedule_event._state.active_events.clear()
+
+        result = schedule_event.handler({"action": "list"})
+
+        assert "Promemoria attivi" in result
+        assert "chiamare Marco" in result
+
+    @pytest.mark.asyncio
+    async def test_deletes_expired_events_without_firing_on_restore(self, setup_events):
+        setup_events.create_scheduled_event(
+            "expired-event",
+            "chiamare Marco",
+            (datetime.now(UTC) - timedelta(seconds=60)).isoformat(),
+        )
+
+        result = schedule_event.handler({"action": "list"})
+
+        assert "Non ci sono promemoria attivi" in result
+        assert setup_events.list_active_scheduled_events() == []
+
+    @pytest.mark.asyncio
+    async def test_fired_event_deletes_record(self, setup_events):
+        due_at = datetime.now(UTC) + timedelta(milliseconds=20)
+        setup_events.create_scheduled_event(
+            "runtime-event",
+            "chiamare Marco",
+            due_at.isoformat(),
+        )
+
+        schedule_event.resume_persisted_events()
+        await asyncio.sleep(0.1)
+
+        assert setup_events.list_active_scheduled_events() == []
+
+    def test_definition_structure(self):
+        assert schedule_event.DEFINITION["function"]["name"] == "schedule_event"
+        params = schedule_event.DEFINITION["function"]["parameters"]
+        assert "action" in params["properties"]
+        assert "title" in params["properties"]
+        assert "due_at" in params["properties"]
+        assert "seconds" in params["properties"]
 
 
 class TestSystemControl:
